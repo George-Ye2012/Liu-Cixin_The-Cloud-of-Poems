@@ -1,0 +1,3190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>诗云 — 刘慈欣</title>
+<style>
+  /* ===== 全局样式：零UI干扰，全屏沉浸 ===== */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #000000;
+    font-family: 'STKaiti', '楷体', 'KaiTi', 'STShouJinShu', 'SimSun', '宋体', serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  canvas { display: block; }
+
+  /* ===== 诗词弹出层 — 古风质感升级 ===== */
+  :root {
+    --poem-gold: #c8b878;
+    --poem-gold-light: #e0d4a8;
+    --poem-gold-dim: #8a7a50;
+    --poem-font-title: '瘦金体', 'STShouJinShu', '华文瘦金体', '启功体', 'STKaiti', '楷体', 'KaiTi', 'SimSun', '宋体', serif;
+    --poem-font-body: 'STKaiti', '楷体', 'KaiTi', '启功体', 'SimSun', '宋体', serif;
+  }
+
+  /* 底板：深空星云纹理 */
+  #poem-overlay {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background:
+      radial-gradient(ellipse at 30% 20%, rgba(25, 20, 50, 0.35) 0%, transparent 55%),
+      radial-gradient(ellipse at 70% 80%, rgba(15, 25, 45, 0.30) 0%, transparent 55%),
+      radial-gradient(ellipse at center, rgba(8, 6, 20, 0.75) 0%, rgba(0, 0, 0, 0.88) 100%);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(180, 160, 120, 0.3);
+    border-radius: 18px;
+    padding: clamp(22px, 4.5vh, 44px) clamp(26px, 5.5vw, 52px);
+    color: var(--poem-gold);
+    pointer-events: auto;
+    opacity: 0;
+    z-index: 10;
+    box-shadow:
+      0 0 80px rgba(100, 80, 40, 0.06),
+      inset 0 0 120px rgba(60, 40, 20, 0.04);
+    max-width: 80vw;
+    max-height: 83vh;
+    overflow-y: auto;
+    user-select: none;
+    font-family: var(--poem-font-body);
+    will-change: opacity;
+  }
+  /* 可见：立即显示底板+启动悬浮（不靠transition，无冲突） */
+  #poem-overlay.visible { opacity: 1; }
+  #poem-overlay.floating {
+    animation: poemFloat 8s ease-in-out infinite;
+  }
+  /* 退场：仅播放消散（!important覆盖任何残留动画） */
+  #poem-overlay.exiting {
+    animation: poemDissolve 0.7s ease-out forwards !important;
+    pointer-events: none;
+  }
+
+  /* 鎏金流光边框 — 用 box-shadow 脉冲替代 mask 方案（兼容性更佳） */
+  @keyframes borderPulse {
+    0%, 100% { box-shadow: 0 0 25px rgba(160, 140, 100, 0.06), inset 0 0 30px rgba(100, 70, 40, 0.04); }
+    50%      { box-shadow: 0 0 45px rgba(190, 160, 115, 0.14), inset 0 0 50px rgba(120, 80, 45, 0.08); }
+  }
+  #poem-overlay.visible {
+    animation: borderPulse 4s ease-in-out infinite;
+  }
+  #poem-overlay.visible.floating {
+    animation: poemFloat 8s ease-in-out infinite, borderPulse 4s ease-in-out infinite;
+  }
+
+  /* ---- 排版与字体 ---- */
+  #poem-overlay .poem-title {
+    font-family: var(--poem-font-title);
+    font-size: clamp(20px, 2.8vw, 32px);
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 8px;
+    letter-spacing: 0.2em;
+    color: var(--poem-gold-light);
+    text-shadow:
+      0 0 8px rgba(200, 170, 120, 0.35),
+      0 0 24px rgba(180, 150, 100, 0.15);
+  }
+  #poem-overlay .poem-author {
+    font-family: var(--poem-font-body);
+    font-size: clamp(13px, 1.7vw, 19px);
+    text-align: right;
+    margin-bottom: 22px;
+    padding-right: 8px;
+    color: #a89870;
+    letter-spacing: 0.12em;
+    text-shadow: 0 0 6px rgba(160, 140, 100, 0.2);
+  }
+  #poem-overlay .poem-content {
+    font-family: var(--poem-font-body);
+    font-size: clamp(15px, 2.1vw, 23px);
+    line-height: 2.2;
+    text-align: center;
+    letter-spacing: 0.1em;
+    color: #c8b888;
+    text-shadow:
+      0 0 3px rgba(180, 155, 115, 0.3),
+      0 0 10px rgba(160, 130, 90, 0.1);
+  }
+  #poem-overlay .poem-hint {
+    text-align: center;
+    font-size: 11px;
+    color: rgba(170, 150, 120, 0.45);
+    margin-top: 22px;
+    letter-spacing: 0.06em;
+  }
+
+  /* ---- 竖排模式 ---- */
+  #poem-overlay.layout-vertical {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    max-height: 85vh;
+    max-width: 85vw;
+    padding: clamp(26px, 5vw, 48px) clamp(18px, 3vw, 36px);
+  }
+  #poem-overlay.layout-vertical .poem-title {
+    text-align: start;
+    letter-spacing: 0.3em;
+    margin-bottom: 0;
+    padding-bottom: 16px;
+    border-bottom: none;
+    border-left: 1px solid rgba(180, 160, 120, 0.15);
+    padding-left: 16px;
+  }
+  #poem-overlay.layout-vertical .poem-author {
+    text-align: start;
+    margin-bottom: 0;
+    margin-left: 16px;
+    padding-right: 0;
+  }
+  #poem-overlay.layout-vertical .poem-content {
+    text-align: start;
+    line-height: 2.4;
+    letter-spacing: 0.2em;
+  }
+  #poem-overlay.layout-vertical .poem-seal {
+    right: auto; left: 12px; bottom: 12px;
+  }
+
+  /* ---- 逐字凝聚动画（仅用 opacity，移除昂贵的 filter:blur） ---- */
+  .poem-char {
+    display: inline-block;
+    opacity: 0;
+    will-change: opacity;
+    animation: charCondense 0.5s ease-out forwards;
+  }
+  #poem-overlay.layout-vertical .poem-char { display: inline-block; }
+  .poem-line { display: block; }
+  .poem-char.space { width: 0.4em; }
+
+  /* ---- 篆刻印章 ---- */
+  .poem-seal {
+    position: absolute;
+    bottom: 16px; right: 18px;
+    font-family: 'SimSun', 'STKaiti', '楷体', serif;
+    font-size: 18px;
+    color: rgba(210, 60, 40, 0.28);
+    border: 1px solid rgba(200, 80, 60, 0.2);
+    border-radius: 4px;
+    padding: 4px 8px;
+    letter-spacing: 0.3em;
+    transform: rotate(-8deg);
+    pointer-events: none;
+    user-select: none;
+    text-shadow: 0 0 6px rgba(180, 40, 20, 0.15);
+  }
+
+  /* ---- 消散粒子 ---- */
+  #poem-particles {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 11;
+    width: 0; height: 0;
+  }
+  .poem-particle {
+    position: absolute;
+    width: 3px; height: 3px;
+    border-radius: 50%;
+    background: #d4c098;
+    opacity: 0;
+    box-shadow: 0 0 6px rgba(200, 170, 120, 0.5);
+  }
+  .poem-particle.fly {
+    animation: particleFly 0.9s ease-out forwards;
+  }
+
+  /* ---- 滚动条（金色细条） ---- */
+  #poem-overlay::-webkit-scrollbar { width: 4px; }
+  #poem-overlay::-webkit-scrollbar-track { background: transparent; }
+  #poem-overlay::-webkit-scrollbar-thumb {
+    background: rgba(180, 160, 120, 0.28);
+    border-radius: 2px;
+  }
+  #poem-overlay::-webkit-scrollbar-thumb:hover {
+    background: rgba(200, 175, 130, 0.5);
+  }
+
+  /* ===== 动效关键帧 ===== */
+  @keyframes charCondense {
+    0%   { opacity: 0; }
+    60%  { opacity: 0.8; }
+    100% { opacity: 1; }
+  }
+
+  @keyframes poemFloat {
+    0%, 100% { transform: translate(-50%, -50%) translateY(0); }
+    25%      { transform: translate(-50%, -50%) translateY(-4px); }
+    75%      { transform: translate(-50%, -50%) translateY(4px); }
+  }
+
+  @keyframes poemDissolve {
+    0%   { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  @keyframes particleFly {
+    0%   { opacity: 1; transform: translate(0, 0) scale(1); }
+    100% { opacity: 0; transform: translate(var(--px), var(--py)) scale(0.2); }
+  }
+
+  /* ===== 手势控制UI：统一淡金色科幻风格 ===== */
+  #hand-control-btn {
+    position: fixed;
+    bottom: 170px;
+    right: 24px;
+    z-index: 20;
+    padding: 10px 28px;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(180, 160, 120, 0.35);
+    border-radius: 24px;
+    color: #d4c8a0;
+    font-family: inherit;
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: all 0.35s ease;
+    user-select: none;
+    outline: none;
+    pointer-events: auto;
+  }
+  #hand-control-btn:hover {
+    background: rgba(30, 25, 15, 0.8);
+    border-color: rgba(200, 180, 130, 0.6);
+    box-shadow: 0 0 24px rgba(180, 150, 100, 0.15);
+  }
+  #hand-control-btn.active {
+    border-color: rgba(180, 200, 150, 0.55);
+    color: #c8e0b0;
+    box-shadow: 0 0 20px rgba(150, 200, 120, 0.2);
+  }
+  #hand-control-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* 摄像头预览小窗 */
+  #camera-preview {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 180px;
+    height: 135px;
+    z-index: 15;
+    border-radius: 12px;
+    border: 1px solid rgba(180, 160, 120, 0.3);
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    overflow: hidden;
+    opacity: 0;
+    transform: scale(0.9);
+    transition: opacity 0.5s ease, transform 0.5s ease;
+    pointer-events: none;
+    box-shadow: 0 0 20px rgba(100, 80, 50, 0.1);
+  }
+  #camera-preview.visible {
+    opacity: 1;
+    transform: scale(1);
+  }
+  #camera-preview video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1); /* 镜像翻转，符合直觉 */
+  }
+
+  /* 权限拒绝提示 — 移至右下角 */
+  #permission-denied {
+    position: fixed;
+    bottom: 145px;
+    right: 24px;
+    z-index: 20;
+    padding: 10px 22px;
+    background: rgba(60, 20, 20, 0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(200, 120, 100, 0.35);
+    border-radius: 20px;
+    color: #d4a098;
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    text-align: center;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    pointer-events: none;
+  }
+  #permission-denied.visible { opacity: 1; }
+
+  /* 手势状态指示器 — 移至左下角 */
+  #gesture-indicator {
+    position: fixed;
+    bottom: 24px;
+    left: 24px;
+    z-index: 19;
+    padding: 6px 18px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 14px;
+    color: rgba(200, 180, 140, 0.7);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+  }
+  #gesture-indicator.visible { opacity: 1; }
+
+  /* ===== 节点数量滑块（左下角） ===== */
+  #node-slider-container {
+    position: fixed;
+    bottom: 58px;
+    left: 20px;
+    z-index: 18;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(180, 160, 120, 0.3);
+    border-radius: 20px;
+    pointer-events: auto;
+  }
+  #node-slider-container label {
+    color: #c8b890;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+    user-select: none;
+  }
+  #node-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 140px;
+    height: 4px;
+    background: rgba(180, 160, 120, 0.25);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  #node-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #d4c8a0;
+    border: 1px solid rgba(200, 180, 130, 0.6);
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(180, 150, 100, 0.3);
+    transition: box-shadow 0.2s ease;
+  }
+  #node-slider::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 20px rgba(200, 170, 110, 0.5);
+  }
+  #node-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #d4c8a0;
+    border: 1px solid rgba(200, 180, 130, 0.6);
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(180, 150, 100, 0.3);
+  }
+  #node-count-display {
+    color: #ead4a0;
+    font-size: 13px;
+    font-weight: bold;
+    letter-spacing: 0.06em;
+    min-width: 36px;
+    text-align: center;
+    user-select: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="poem-overlay">
+  <div class="poem-title"></div>
+  <div class="poem-author"></div>
+  <div class="poem-content"></div>
+  <div class="poem-seal">诗云</div>
+  <div class="poem-hint">✦ 点击空白处关闭 ✦</div>
+</div>
+<div id="poem-particles"></div>
+
+<!-- ===== 手势控制UI元素 ===== -->
+<button id="hand-control-btn" title="启动手势控制">🖐️ 启动手势控制</button>
+<div id="camera-preview"><video id="camera-video" autoplay playsinline></video></div>
+<div id="permission-denied">⚠️ 摄像头权限被拒绝，手势控制不可用<br>已自动降级为键鼠交互模式</div>
+<div id="gesture-indicator"></div>
+
+<!-- ===== 节点数量滑块 ===== -->
+<div id="node-slider-container">
+  <label for="node-slider">✦ 诗云节点</label>
+  <input type="range" id="node-slider" min="100" max="2000" value="1000" step="10">
+  <span id="node-count-display">1000</span>
+</div>
+
+<!-- ===== Three.js Import Map (CDN) ===== -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<!-- ===== MediaPipe Hands 手势识别库（本地文件，无需CDN） ===== -->
+<script src="mediapipe_hands/package/hands.js"></script>
+
+<script type="module">
+// ===================================================================
+//  诗云 — 基于 Three.js 的沉浸式3D诗词宇宙可视化
+//  灵感来源：刘慈欣《诗云》短篇小说
+//  新增：MediaPipe手势控制（单手旋转/双手缩放/双拳聚合）
+// ===================================================================
+
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+// ===================================================================
+//  一、全局可配置参数 — 集中管理，无需修改逻辑即可二次调整
+// ===================================================================
+const CONFIG = {
+  // ---- 节点 ----
+  nodeCount: 1000,            // 节点总数量（默认1000，性能与视觉平衡）
+  nodeSize: 0.18,             // 节点几何大小（3D空间单位）
+  scatterRadius: 14,          // 星云散开半径
+  gatherRadius: 2.8,          // 聚合球体半径
+
+  // ---- 连线 ----
+  linkMaxDistance: 3.6,       // 连线最大距离阈值（3D空间单位）
+  linkColor: '#d4b87a',       // 连线颜色（淡金色）
+  linkBaseOpacity: 0.5,       // 连线基础透明度
+
+  // ---- 运动 ----
+  rotationSpeed: 0.08,        // 星云整体公转速度（弧度/秒）
+  floatAmplitude: 0.35,       // 节点漂浮幅度
+  floatFrequency: 0.6,        // 节点漂浮基础频率
+
+  // ---- 后期 ----
+  bloomIntensity: 1.2,        // 泛光/体积光强度
+  bloomRadius: 0.5,           // 泛光扩散半径
+  bloomThreshold: 0.7,        // 泛光亮度阈值
+
+  // ---- 动画 ----
+  gatherDuration: 2200,       // 聚散动画时长（毫秒）
+  poemDisplayTime: 0,         // 诗句显示时长（0=手动关闭）
+
+  // ---- 诗词弹窗动效 ----
+  poemLayout: 'horizontal',     // 排版模式：horizontal（横排）/ vertical（竖排）
+  poemEnterDuration: 2.0,       // 入场凝聚动画总时长（秒）
+  poemGlowIntensity: 1.0,       // 文字鎏金辉光强度系数
+  poemSealEnabled: true,        // 是否显示「诗云」篆刻印章
+  poemDimBackground: true,      // 是否开启背景变暗聚焦效果
+  poemDimAmount: 0.5,           // 背景变暗时泛光强度乘数（0~1）
+  poemCharacterInterval: 0.018, // 逐字出现的间隔时长（秒）
+  poemExitParticleCount: 36,    // 退场消散粒子数量
+  poemFloatEnabled: true,       // 是否启用悬浮呼吸感
+
+  // ---- 粒子 ----
+  starCount: 1500,            // 背景星光粒子数量
+  dustCount: 2000,            // 宇宙尘埃粒子数量
+  dustSpread: 55,             // 尘埃分布范围
+
+  // ---- 相机 ----
+  cameraFov: 75,              // 视场角
+  cameraNear: 0.5,            // 近裁剪面
+  cameraFar: 200,             // 远裁剪面
+  cameraInitZ: 22,            // 相机初始Z位置
+
+  // ---- 手势控制 ----
+  handGestureEnabled: false,     // 是否启用手势识别（点击按钮后开启）
+  handRotateSensitivity: 1.0,   // 手势旋转灵敏度系数
+  handZoomSensitivity: 1.0,     // 手势缩放灵敏度系数
+  handGatherSensitivity: 1.0,   // 手势聚合灵敏度系数
+  handSmoothFactor: 0.75,       // 手部坐标平滑系数（越大越平稳，0~1）
+  showCameraPreview: true,      // 是否显示摄像头预览小窗
+  handConfidenceThreshold: 0.7, // 手势识别置信度阈值（0~1）
+  handIdleTimeout: 2000,        // 手部未检测超时自动暂停（毫秒）
+  handRecognitionFPS: 30,       // 手势识别帧率（独立于3D渲染）
+
+  // ---- 节点数量滑块 ----
+  nodeCountMin: 100,            // 滑块最小节点数
+  nodeCountMax: 2000,           // 滑块最大节点数
+  nodeCountDefault: 1000,       // 默认节点数
+  sliderDebounceMs: 350,        // 滑块防抖延迟（毫秒）
+
+  // ---- 性能优化 ----
+  spatialGridEnabled: true,     // 是否启用空间网格加速连线计算
+};
+
+// ===================================================================
+//  二、中国古诗词库 — 200+首经典诗词
+//     字段：title(诗名) author(作者) dynasty(朝代) content(全诗内容)
+// ===================================================================
+const POEMS = [
+  // ======== 诗经 / 先秦 ========
+  { title:'关雎', author:'佚名', dynasty:'先秦·诗经', content:'关关雎鸠，在河之洲。\n窈窕淑女，君子好逑。\n参差荇菜，左右流之。\n窈窕淑女，寤寐求之。\n求之不得，寤寐思服。\n悠哉悠哉，辗转反侧。\n参差荇菜，左右采之。\n窈窕淑女，琴瑟友之。\n参差荇菜，左右芼之。\n窈窕淑女，钟鼓乐之。' },
+  { title:'蒹葭', author:'佚名', dynasty:'先秦·诗经', content:'蒹葭苍苍，白露为霜。\n所谓伊人，在水一方。\n溯洄从之，道阻且长。\n溯游从之，宛在水中央。\n\n蒹葭萋萋，白露未晞。\n所谓伊人，在水之湄。\n溯洄从之，道阻且跻。\n溯游从之，宛在水中坻。\n\n蒹葭采采，白露未已。\n所谓伊人，在水之涘。\n溯洄从之，道阻且右。\n溯游从之，宛在水中沚。' },
+  { title:'桃夭', author:'佚名', dynasty:'先秦·诗经', content:'桃之夭夭，灼灼其华。\n之子于归，宜其室家。\n桃之夭夭，有蕡其实。\n之子于归，宜其家室。\n桃之夭夭，其叶蓁蓁。\n之子于归，宜其家人。' },
+  { title:'子衿', author:'佚名', dynasty:'先秦·诗经', content:'青青子衿，悠悠我心。\n纵我不往，子宁不嗣音？\n青青子佩，悠悠我思。\n纵我不往，子宁不来？\n挑兮达兮，在城阙兮。\n一日不见，如三月兮。' },
+  { title:'鹿鸣', author:'佚名', dynasty:'先秦·诗经', content:'呦呦鹿鸣，食野之苹。\n我有嘉宾，鼓瑟吹笙。\n吹笙鼓簧，承筐是将。\n人之好我，示我周行。\n呦呦鹿鸣，食野之蒿。\n我有嘉宾，德音孔昭。\n视民不恌，君子是则是效。\n我有旨酒，嘉宾式燕以敖。' },
+  { title:'采薇（节选）', author:'佚名', dynasty:'先秦·诗经', content:'采薇采薇，薇亦作止。\n曰归曰归，岁亦莫止。\n靡室靡家，猃狁之故。\n不遑启居，猃狁之故。\n\n昔我往矣，杨柳依依。\n今我来思，雨雪霏霏。\n行道迟迟，载渴载饥。\n我心伤悲，莫知我哀。' },
+  { title:'静女', author:'佚名', dynasty:'先秦·诗经', content:'静女其姝，俟我于城隅。\n爱而不见，搔首踟蹰。\n静女其娈，贻我彤管。\n彤管有炜，说怿女美。\n自牧归荑，洵美且异。\n匪女之为美，美人之贻。' },
+  { title:'黍离', author:'佚名', dynasty:'先秦·诗经', content:'彼黍离离，彼稷之苗。\n行迈靡靡，中心摇摇。\n知我者谓我心忧，不知我者谓我何求。\n悠悠苍天，此何人哉！' },
+
+  // ======== 楚辞 ========
+  { title:'离骚（节选）', author:'屈原', dynasty:'先秦·楚辞', content:'长太息以掩涕兮，哀民生之多艰。\n余虽好修姱以鞿羁兮，謇朝谇而夕替。\n亦余心之所善兮，虽九死其犹未悔。\n路漫漫其修远兮，吾将上下而求索。' },
+  { title:'九歌·湘夫人', author:'屈原', dynasty:'先秦·楚辞', content:'帝子降兮北渚，目眇眇兮愁予。\n袅袅兮秋风，洞庭波兮木叶下。\n登白薠兮骋望，与佳期兮夕张。\n鸟何萃兮蘋中，罾何为兮木上？' },
+
+  // ======== 汉魏六朝 ========
+  { title:'行行重行行', author:'佚名', dynasty:'汉·古诗十九首', content:'行行重行行，与君生别离。\n相去万余里，各在天一涯。\n道路阻且长，会面安可知？\n胡马依北风，越鸟巢南枝。\n相去日已远，衣带日已缓。\n浮云蔽白日，游子不顾返。\n思君令人老，岁月忽已晚。\n弃捐勿复道，努力加餐饭。' },
+  { title:'迢迢牵牛星', author:'佚名', dynasty:'汉·古诗十九首', content:'迢迢牵牛星，皎皎河汉女。\n纤纤擢素手，札札弄机杼。\n终日不成章，泣涕零如雨。\n河汉清且浅，相去复几许？\n盈盈一水间，脉脉不得语。' },
+  { title:'涉江采芙蓉', author:'佚名', dynasty:'汉·古诗十九首', content:'涉江采芙蓉，兰泽多芳草。\n采之欲遗谁？所思在远道。\n还顾望旧乡，长路漫浩浩。\n同心而离居，忧伤以终老。' },
+  { title:'短歌行', author:'曹操', dynasty:'汉末', content:'对酒当歌，人生几何！\n譬如朝露，去日苦多。\n慨当以慷，忧思难忘。\n何以解忧？唯有杜康。\n青青子衿，悠悠我心。\n但为君故，沉吟至今。\n呦呦鹿鸣，食野之苹。\n我有嘉宾，鼓瑟吹笙。\n明明如月，何时可掇？\n忧从中来，不可断绝。\n越陌度阡，枉用相存。\n契阔谈䜩，心念旧恩。\n月明星稀，乌鹊南飞。\n绕树三匝，何枝可依？\n山不厌高，海不厌深。\n周公吐哺，天下归心。' },
+  { title:'观沧海', author:'曹操', dynasty:'汉末', content:'东临碣石，以观沧海。\n水何澹澹，山岛竦峙。\n树木丛生，百草丰茂。\n秋风萧瑟，洪波涌起。\n日月之行，若出其中。\n星汉灿烂，若出其里。\n幸甚至哉，歌以咏志。' },
+  { title:'龟虽寿', author:'曹操', dynasty:'汉末', content:'神龟虽寿，犹有竟时。\n腾蛇乘雾，终为土灰。\n老骥伏枥，志在千里。\n烈士暮年，壮心不已。\n盈缩之期，不但在天。\n养怡之福，可得永年。\n幸甚至哉，歌以咏志。' },
+  { title:'七步诗', author:'曹植', dynasty:'三国·魏', content:'煮豆燃豆萁，豆在釜中泣。\n本是同根生，相煎何太急？' },
+  { title:'饮酒·其五', author:'陶渊明', dynasty:'东晋', content:'结庐在人境，而无车马喧。\n问君何能尔？心远地自偏。\n采菊东篱下，悠然见南山。\n山气日夕佳，飞鸟相与还。\n此中有真意，欲辨已忘言。' },
+  { title:'归园田居·其一', author:'陶渊明', dynasty:'东晋', content:'少无适俗韵，性本爱丘山。\n误落尘网中，一去三十年。\n羁鸟恋旧林，池鱼思故渊。\n开荒南野际，守拙归园田。\n方宅十余亩，草屋八九间。\n榆柳荫后檐，桃李罗堂前。\n暧暧远人村，依依墟里烟。\n狗吠深巷中，鸡鸣桑树颠。\n户庭无尘杂，虚室有余闲。\n久在樊笼里，复得返自然。' },
+  { title:'归园田居·其三', author:'陶渊明', dynasty:'东晋', content:'种豆南山下，草盛豆苗稀。\n晨兴理荒秽，带月荷锄归。\n道狭草木长，夕露沾我衣。\n衣沾不足惜，但使愿无违。' },
+  { title:'木兰诗（节选）', author:'佚名', dynasty:'北朝民歌', content:'唧唧复唧唧，木兰当户织。\n不闻机杼声，唯闻女叹息。\n问女何所思，问女何所忆。\n女亦无所思，女亦无所忆。\n\n万里赴戎机，关山度若飞。\n朔气传金柝，寒光照铁衣。\n将军百战死，壮士十年归。' },
+  { title:'敕勒歌', author:'佚名', dynasty:'北朝民歌', content:'敕勒川，阴山下。\n天似穹庐，笼盖四野。\n天苍苍，野茫茫，\n风吹草低见牛羊。' },
+  { title:'西洲曲（节选）', author:'佚名', dynasty:'南朝民歌', content:'忆梅下西洲，折梅寄江北。\n单衫杏子红，双鬓鸦雏色。\n西洲在何处？两桨桥头渡。\n日暮伯劳飞，风吹乌臼树。\n海水梦悠悠，君愁我亦愁。\n南风知我意，吹梦到西洲。' },
+
+  // ======== 唐代 — 李白 ========
+  { title:'静夜思', author:'李白', dynasty:'唐', content:'床前明月光，疑是地上霜。\n举头望明月，低头思故乡。' },
+  { title:'望庐山瀑布', author:'李白', dynasty:'唐', content:'日照香炉生紫烟，遥看瀑布挂前川。\n飞流直下三千尺，疑是银河落九天。' },
+  { title:'早发白帝城', author:'李白', dynasty:'唐', content:'朝辞白帝彩云间，千里江陵一日还。\n两岸猿声啼不住，轻舟已过万重山。' },
+  { title:'赠汪伦', author:'李白', dynasty:'唐', content:'李白乘舟将欲行，忽闻岸上踏歌声。\n桃花潭水深千尺，不及汪伦送我情。' },
+  { title:'黄鹤楼送孟浩然之广陵', author:'李白', dynasty:'唐', content:'故人西辞黄鹤楼，烟花三月下扬州。\n孤帆远影碧空尽，唯见长江天际流。' },
+  { title:'望天门山', author:'李白', dynasty:'唐', content:'天门中断楚江开，碧水东流至此回。\n两岸青山相对出，孤帆一片日边来。' },
+  { title:'独坐敬亭山', author:'李白', dynasty:'唐', content:'众鸟高飞尽，孤云独去闲。\n相看两不厌，只有敬亭山。' },
+  { title:'月下独酌·其一', author:'李白', dynasty:'唐', content:'花间一壶酒，独酌无相亲。\n举杯邀明月，对影成三人。\n月既不解饮，影徒随我身。\n暂伴月将影，行乐须及春。\n我歌月徘徊，我舞影零乱。\n醒时同交欢，醉后各分散。\n永结无情游，相期邈云汉。' },
+  { title:'将进酒', author:'李白', dynasty:'唐', content:'君不见黄河之水天上来，奔流到海不复回。\n君不见高堂明镜悲白发，朝如青丝暮成雪。\n人生得意须尽欢，莫使金樽空对月。\n天生我材必有用，千金散尽还复来。\n烹羊宰牛且为乐，会须一饮三百杯。\n岑夫子，丹丘生，将进酒，杯莫停。\n与君歌一曲，请君为我倾耳听。\n钟鼓馔玉不足贵，但愿长醉不愿醒。\n古来圣贤皆寂寞，惟有饮者留其名。\n陈王昔时宴平乐，斗酒十千恣欢谑。\n主人何为言少钱，径须沽取对君酌。\n五花马，千金裘，呼儿将出换美酒，与尔同销万古愁。' },
+  { title:'行路难·其一', author:'李白', dynasty:'唐', content:'金樽清酒斗十千，玉盘珍羞直万钱。\n停杯投箸不能食，拔剑四顾心茫然。\n欲渡黄河冰塞川，将登太行雪满山。\n闲来垂钓碧溪上，忽复乘舟梦日边。\n行路难，行路难，多歧路，今安在？\n长风破浪会有时，直挂云帆济沧海。' },
+  { title:'蜀道难', author:'李白', dynasty:'唐', content:'噫吁嚱，危乎高哉！蜀道之难，难于上青天！\n蚕丛及鱼凫，开国何茫然！\n尔来四万八千岁，不与秦塞通人烟。\n西当太白有鸟道，可以横绝峨眉巅。\n地崩山摧壮士死，然后天梯石栈相钩连。\n上有六龙回日之高标，下有冲波逆折之回川。\n黄鹤之飞尚不得过，猿猱欲度愁攀援。\n青泥何盘盘，百步九折萦岩峦。\n扪参历井仰胁息，以手抚膺坐长叹。\n问君西游何时还？畏途巉岩不可攀。\n但见悲鸟号古木，雄飞雌从绕林间。\n又闻子规啼夜月，愁空山。\n蜀道之难，难于上青天，使人听此凋朱颜！\n连峰去天不盈尺，枯松倒挂倚绝壁。\n飞湍瀑流争喧豗，砯崖转石万壑雷。\n其险也如此，嗟尔远道之人胡为乎来哉！\n剑阁峥嵘而崔嵬，一夫当关，万夫莫开。\n所守或匪亲，化为狼与豺。\n朝避猛虎，夕避长蛇。\n磨牙吮血，杀人如麻。\n锦城虽云乐，不如早还家。\n蜀道之难，难于上青天，侧身西望长咨嗟！' },
+  { title:'梦游天姥吟留别', author:'李白', dynasty:'唐', content:'海客谈瀛洲，烟涛微茫信难求。\n越人语天姥，云霞明灭或可睹。\n天姥连天向天横，势拔五岳掩赤城。\n天台四万八千丈，对此欲倒东南倾。\n我欲因之梦吴越，一夜飞度镜湖月。\n湖月照我影，送我至剡溪。\n谢公宿处今尚在，渌水荡漾清猿啼。\n脚著谢公屐，身登青云梯。\n半壁见海日，空中闻天鸡。\n千岩万转路不定，迷花倚石忽已暝。\n熊咆龙吟殷岩泉，栗深林兮惊层巅。\n云青青兮欲雨，水澹澹兮生烟。\n列缺霹雳，丘峦崩摧。\n洞天石扉，訇然中开。\n青冥浩荡不见底，日月照耀金银台。\n霓为衣兮风为马，云之君兮纷纷而来下。\n虎鼓瑟兮鸾回车，仙之人兮列如麻。\n忽魂悸以魄动，恍惊起而长嗟。\n惟觉时之枕席，失向来之烟霞。\n世间行乐亦如此，古来万事东流水。\n别君去兮何时还？且放白鹿青崖间，须行即骑访名山。\n安能摧眉折腰事权贵，使我不得开心颜！' },
+  { title:'宣州谢朓楼饯别校书叔云', author:'李白', dynasty:'唐', content:'弃我去者，昨日之日不可留；\n乱我心者，今日之日多烦忧。\n长风万里送秋雁，对此可以酣高楼。\n蓬莱文章建安骨，中间小谢又清发。\n俱怀逸兴壮思飞，欲上青天览明月。\n抽刀断水水更流，举杯消愁愁更愁。\n人生在世不称意，明朝散发弄扁舟。' },
+  { title:'夜宿山寺', author:'李白', dynasty:'唐', content:'危楼高百尺，手可摘星辰。\n不敢高声语，恐惊天上人。' },
+  { title:'春夜洛城闻笛', author:'李白', dynasty:'唐', content:'谁家玉笛暗飞声，散入春风满洛城。\n此夜曲中闻折柳，何人不起故园情。' },
+  { title:'关山月', author:'李白', dynasty:'唐', content:'明月出天山，苍茫云海间。\n长风几万里，吹度玉门关。\n汉下白登道，胡窥青海湾。\n由来征战地，不见有人还。\n戍客望边邑，思归多苦颜。\n高楼当此夜，叹息未应闲。' },
+  { title:'登金陵凤凰台', author:'李白', dynasty:'唐', content:'凤凰台上凤凰游，凤去台空江自流。\n吴宫花草埋幽径，晋代衣冠成古丘。\n三山半落青天外，二水中分白鹭洲。\n总为浮云能蔽日，长安不见使人愁。' },
+
+  // ======== 唐代 — 杜甫 ========
+  { title:'春望', author:'杜甫', dynasty:'唐', content:'国破山河在，城春草木深。\n感时花溅泪，恨别鸟惊心。\n烽火连三月，家书抵万金。\n白头搔更短，浑欲不胜簪。' },
+  { title:'登高', author:'杜甫', dynasty:'唐', content:'风急天高猿啸哀，渚清沙白鸟飞回。\n无边落木萧萧下，不尽长江滚滚来。\n万里悲秋常作客，百年多病独登台。\n艰难苦恨繁霜鬓，潦倒新停浊酒杯。' },
+  { title:'望岳', author:'杜甫', dynasty:'唐', content:'岱宗夫如何？齐鲁青未了。\n造化钟神秀，阴阳割昏晓。\n荡胸生曾云，决眦入归鸟。\n会当凌绝顶，一览众山小。' },
+  { title:'绝句', author:'杜甫', dynasty:'唐', content:'两个黄鹂鸣翠柳，一行白鹭上青天。\n窗含西岭千秋雪，门泊东吴万里船。' },
+  { title:'春夜喜雨', author:'杜甫', dynasty:'唐', content:'好雨知时节，当春乃发生。\n随风潜入夜，润物细无声。\n野径云俱黑，江船火独明。\n晓看红湿处，花重锦官城。' },
+  { title:'茅屋为秋风所破歌', author:'杜甫', dynasty:'唐', content:'八月秋高风怒号，卷我屋上三重茅。\n茅飞渡江洒江郊，高者挂罥长林梢，下者飘转沉塘坳。\n南村群童欺我老无力，忍能对面为盗贼。\n公然抱茅入竹去，唇焦口燥呼不得，归来倚杖自叹息。\n俄顷风定云墨色，秋天漠漠向昏黑。\n布衾多年冷似铁，娇儿恶卧踏里裂。\n床头屋漏无干处，雨脚如麻未断绝。\n自经丧乱少睡眠，长夜沾湿何由彻！\n安得广厦千万间，大庇天下寒士俱欢颜！\n风雨不动安如山。呜呼！何时眼前突兀见此屋，吾庐独破受冻死亦足！' },
+  { title:'登岳阳楼', author:'杜甫', dynasty:'唐', content:'昔闻洞庭水，今上岳阳楼。\n吴楚东南坼，乾坤日夜浮。\n亲朋无一字，老病有孤舟。\n戎马关山北，凭轩涕泗流。' },
+  { title:'蜀相', author:'杜甫', dynasty:'唐', content:'丞相祠堂何处寻？锦官城外柏森森。\n映阶碧草自春色，隔叶黄鹂空好音。\n三顾频烦天下计，两朝开济老臣心。\n出师未捷身先死，长使英雄泪满襟。' },
+  { title:'旅夜书怀', author:'杜甫', dynasty:'唐', content:'细草微风岸，危樯独夜舟。\n星垂平野阔，月涌大江流。\n名岂文章著，官应老病休。\n飘飘何所似？天地一沙鸥。' },
+  { title:'闻官军收河南河北', author:'杜甫', dynasty:'唐', content:'剑外忽传收蓟北，初闻涕泪满衣裳。\n却看妻子愁何在，漫卷诗书喜欲狂。\n白日放歌须纵酒，青春作伴好还乡。\n即从巴峡穿巫峡，便下襄阳向洛阳。' },
+  { title:'江南逢李龟年', author:'杜甫', dynasty:'唐', content:'岐王宅里寻常见，崔九堂前几度闻。\n正是江南好风景，落花时节又逢君。' },
+  { title:'月夜忆舍弟', author:'杜甫', dynasty:'唐', content:'戍鼓断人行，边秋一雁声。\n露从今夜白，月是故乡明。\n有弟皆分散，无家问死生。\n寄书长不达，况乃未休兵。' },
+  { title:'客至', author:'杜甫', dynasty:'唐', content:'舍南舍北皆春水，但见群鸥日日来。\n花径不曾缘客扫，蓬门今始为君开。\n盘飧市远无兼味，樽酒家贫只旧醅。\n肯与邻翁相对饮，隔篱呼取尽余杯。' },
+  { title:'江畔独步寻花·其六', author:'杜甫', dynasty:'唐', content:'黄四娘家花满蹊，千朵万朵压枝低。\n留连戏蝶时时舞，自在娇莺恰恰啼。' },
+  { title:'兵车行', author:'杜甫', dynasty:'唐', content:'车辚辚，马萧萧，行人弓箭各在腰。\n爷娘妻子走相送，尘埃不见咸阳桥。\n牵衣顿足拦道哭，哭声直上干云霄。\n道旁过者问行人，行人但云点行频。\n或从十五北防河，便至四十西营田。\n去时里正与裹头，归来头白还戍边。\n边庭流血成海水，武皇开边意未已。\n君不闻汉家山东二百州，千村万落生荆杞。\n纵有健妇把锄犁，禾生陇亩无东西。\n况复秦兵耐苦战，被驱不异犬与鸡。\n长者虽有问，役夫敢申恨？\n且如今年冬，未休关西卒。\n县官急索租，租税从何出？\n信知生男恶，反是生女好。\n生女犹得嫁比邻，生男埋没随百草。\n君不见青海头，古来白骨无人收。\n新鬼烦冤旧鬼哭，天阴雨湿声啾啾！' },
+
+  // ======== 唐代 — 王维 ========
+  { title:'鹿柴', author:'王维', dynasty:'唐', content:'空山不见人，但闻人语响。\n返景入深林，复照青苔上。' },
+  { title:'送元二使安西', author:'王维', dynasty:'唐', content:'渭城朝雨浥轻尘，客舍青青柳色新。\n劝君更尽一杯酒，西出阳关无故人。' },
+  { title:'九月九日忆山东兄弟', author:'王维', dynasty:'唐', content:'独在异乡为异客，每逢佳节倍思亲。\n遥知兄弟登高处，遍插茱萸少一人。' },
+  { title:'相思', author:'王维', dynasty:'唐', content:'红豆生南国，春来发几枝。\n愿君多采撷，此物最相思。' },
+  { title:'竹里馆', author:'王维', dynasty:'唐', content:'独坐幽篁里，弹琴复长啸。\n深林人不知，明月来相照。' },
+  { title:'山居秋暝', author:'王维', dynasty:'唐', content:'空山新雨后，天气晚来秋。\n明月松间照，清泉石上流。\n竹喧归浣女，莲动下渔舟。\n随意春芳歇，王孙自可留。' },
+  { title:'使至塞上', author:'王维', dynasty:'唐', content:'单车欲问边，属国过居延。\n征蓬出汉塞，归雁入胡天。\n大漠孤烟直，长河落日圆。\n萧关逢候骑，都护在燕然。' },
+  { title:'鸟鸣涧', author:'王维', dynasty:'唐', content:'人闲桂花落，夜静春山空。\n月出惊山鸟，时鸣春涧中。' },
+  { title:'终南别业', author:'王维', dynasty:'唐', content:'中岁颇好道，晚家南山陲。\n兴来每独往，胜事空自知。\n行到水穷处，坐看云起时。\n偶然值林叟，谈笑无还期。' },
+  { title:'画', author:'王维', dynasty:'唐', content:'远看山有色，近听水无声。\n春去花还在，人来鸟不惊。' },
+
+  // ======== 唐代 — 白居易 ========
+  { title:'赋得古原草送别', author:'白居易', dynasty:'唐', content:'离离原上草，一岁一枯荣。\n野火烧不尽，春风吹又生。\n远芳侵古道，晴翠接荒城。\n又送王孙去，萋萋满别情。' },
+  { title:'钱塘湖春行', author:'白居易', dynasty:'唐', content:'孤山寺北贾亭西，水面初平云脚低。\n几处早莺争暖树，谁家新燕啄春泥。\n乱花渐欲迷人眼，浅草才能没马蹄。\n最爱湖东行不足，绿杨阴里白沙堤。' },
+  { title:'忆江南·其一', author:'白居易', dynasty:'唐', content:'江南好，风景旧曾谙。\n日出江花红胜火，春来江水绿如蓝。\n能不忆江南？' },
+  { title:'琵琶行（节选）', author:'白居易', dynasty:'唐', content:'浔阳江头夜送客，枫叶荻花秋瑟瑟。\n主人下马客在船，举酒欲饮无管弦。\n醉不成欢惨将别，别时茫茫江浸月。\n忽闻水上琵琶声，主人忘归客不发。\n\n大弦嘈嘈如急雨，小弦切切如私语。\n嘈嘈切切错杂弹，大珠小珠落玉盘。\n间关莺语花底滑，幽咽泉流冰下难。\n冰泉冷涩弦凝绝，凝绝不通声暂歇。\n别有幽愁暗恨生，此时无声胜有声。\n银瓶乍破水浆迸，铁骑突出刀枪鸣。\n曲终收拨当心画，四弦一声如裂帛。\n东船西舫悄无言，唯见江心秋月白。\n\n同是天涯沦落人，相逢何必曾相识！' },
+  { title:'长恨歌（节选）', author:'白居易', dynasty:'唐', content:'汉皇重色思倾国，御宇多年求不得。\n杨家有女初长成，养在深闺人未识。\n天生丽质难自弃，一朝选在君王侧。\n回眸一笑百媚生，六宫粉黛无颜色。\n\n在天愿作比翼鸟，在地愿为连理枝。\n天长地久有时尽，此恨绵绵无绝期。' },
+  { title:'大林寺桃花', author:'白居易', dynasty:'唐', content:'人间四月芳菲尽，山寺桃花始盛开。\n长恨春归无觅处，不知转入此中来。' },
+  { title:'暮江吟', author:'白居易', dynasty:'唐', content:'一道残阳铺水中，半江瑟瑟半江红。\n可怜九月初三夜，露似真珠月似弓。' },
+  { title:'问刘十九', author:'白居易', dynasty:'唐', content:'绿蚁新醅酒，红泥小火炉。\n晚来天欲雪，能饮一杯无？' },
+  { title:'池上', author:'白居易', dynasty:'唐', content:'小娃撑小艇，偷采白莲回。\n不解藏踪迹，浮萍一道开。' },
+
+  // ======== 唐代 — 其他名家 ========
+  { title:'春晓', author:'孟浩然', dynasty:'唐', content:'春眠不觉晓，处处闻啼鸟。\n夜来风雨声，花落知多少。' },
+  { title:'登鹳雀楼', author:'王之涣', dynasty:'唐', content:'白日依山尽，黄河入海流。\n欲穷千里目，更上一层楼。' },
+  { title:'出塞', author:'王昌龄', dynasty:'唐', content:'秦时明月汉时关，万里长征人未还。\n但使龙城飞将在，不教胡马度阴山。' },
+  { title:'咏柳', author:'贺知章', dynasty:'唐', content:'碧玉妆成一树高，万条垂下绿丝绦。\n不知细叶谁裁出，二月春风似剪刀。' },
+  { title:'枫桥夜泊', author:'张继', dynasty:'唐', content:'月落乌啼霜满天，江枫渔火对愁眠。\n姑苏城外寒山寺，夜半钟声到客船。' },
+  { title:'山行', author:'杜牧', dynasty:'唐', content:'远上寒山石径斜，白云生处有人家。\n停车坐爱枫林晚，霜叶红于二月花。' },
+  { title:'清明', author:'杜牧', dynasty:'唐', content:'清明时节雨纷纷，路上行人欲断魂。\n借问酒家何处有，牧童遥指杏花村。' },
+  { title:'锦瑟', author:'李商隐', dynasty:'唐', content:'锦瑟无端五十弦，一弦一柱思华年。\n庄生晓梦迷蝴蝶，望帝春心托杜鹃。\n沧海月明珠有泪，蓝田日暖玉生烟。\n此情可待成追忆，只是当时已惘然。' },
+  { title:'夜雨寄北', author:'李商隐', dynasty:'唐', content:'君问归期未有期，巴山夜雨涨秋池。\n何当共剪西窗烛，却话巴山夜雨时。' },
+  { title:'游子吟', author:'孟郊', dynasty:'唐', content:'慈母手中线，游子身上衣。\n临行密密缝，意恐迟迟归。\n谁言寸草心，报得三春晖。' },
+  { title:'寻隐者不遇', author:'贾岛', dynasty:'唐', content:'松下问童子，言师采药去。\n只在此山中，云深不知处。' },
+  { title:'江雪', author:'柳宗元', dynasty:'唐', content:'千山鸟飞绝，万径人踪灭。\n孤舟蓑笠翁，独钓寒江雪。' },
+  { title:'乌衣巷', author:'刘禹锡', dynasty:'唐', content:'朱雀桥边野草花，乌衣巷口夕阳斜。\n旧时王谢堂前燕，飞入寻常百姓家。' },
+  { title:'黄鹤楼', author:'崔颢', dynasty:'唐', content:'昔人已乘黄鹤去，此地空余黄鹤楼。\n黄鹤一去不复返，白云千载空悠悠。\n晴川历历汉阳树，芳草萋萋鹦鹉洲。\n日暮乡关何处是？烟波江上使人愁。' },
+  { title:'凉州词', author:'王翰', dynasty:'唐', content:'葡萄美酒夜光杯，欲饮琵琶马上催。\n醉卧沙场君莫笑，古来征战几人回？' },
+  { title:'别董大', author:'高适', dynasty:'唐', content:'千里黄云白日曛，北风吹雁雪纷纷。\n莫愁前路无知己，天下谁人不识君。' },
+  { title:'白雪歌送武判官归京', author:'岑参', dynasty:'唐', content:'北风卷地白草折，胡天八月即飞雪。\n忽如一夜春风来，千树万树梨花开。\n散入珠帘湿罗幕，狐裘不暖锦衾薄。\n将军角弓不得控，都护铁衣冷难着。\n瀚海阑干百丈冰，愁云惨淡万里凝。\n中军置酒饮归客，胡琴琵琶与羌笛。\n纷纷暮雪下辕门，风掣红旗冻不翻。\n轮台东门送君去，去时雪满天山路。\n山回路转不见君，雪上空留马行处。' },
+  { title:'望月怀远', author:'张九龄', dynasty:'唐', content:'海上生明月，天涯共此时。\n情人怨遥夜，竟夕起相思。\n灭烛怜光满，披衣觉露滋。\n不堪盈手赠，还寝梦佳期。' },
+  { title:'送杜少府之任蜀州', author:'王勃', dynasty:'唐', content:'城阙辅三秦，风烟望五津。\n与君离别意，同是宦游人。\n海内存知己，天涯若比邻。\n无为在歧路，儿女共沾巾。' },
+  { title:'登幽州台歌', author:'陈子昂', dynasty:'唐', content:'前不见古人，后不见来者。\n念天地之悠悠，独怆然而涕下。' },
+  { title:'滁州西涧', author:'韦应物', dynasty:'唐', content:'独怜幽草涧边生，上有黄鹂深树鸣。\n春潮带雨晚来急，野渡无人舟自横。' },
+  { title:'题破山寺后禅院', author:'常建', dynasty:'唐', content:'清晨入古寺，初日照高林。\n曲径通幽处，禅房花木深。\n山光悦鸟性，潭影空人心。\n万籁此都寂，但余钟磬音。' },
+  { title:'回乡偶书', author:'贺知章', dynasty:'唐', content:'少小离家老大回，乡音无改鬓毛衰。\n儿童相见不相识，笑问客从何处来。' },
+  { title:'芙蓉楼送辛渐', author:'王昌龄', dynasty:'唐', content:'寒雨连江夜入吴，平明送客楚山孤。\n洛阳亲友如相问，一片冰心在玉壶。' },
+  { title:'泊秦淮', author:'杜牧', dynasty:'唐', content:'烟笼寒水月笼沙，夜泊秦淮近酒家。\n商女不知亡国恨，隔江犹唱后庭花。' },
+  { title:'赤壁', author:'杜牧', dynasty:'唐', content:'折戟沉沙铁未销，自将磨洗认前朝。\n东风不与周郎便，铜雀春深锁二乔。' },
+  { title:'无题·相见时难别亦难', author:'李商隐', dynasty:'唐', content:'相见时难别亦难，东风无力百花残。\n春蚕到死丝方尽，蜡炬成灰泪始干。\n晓镜但愁云鬓改，夜吟应觉月光寒。\n蓬山此去无多路，青鸟殷勤为探看。' },
+  { title:'酬乐天扬州初逢席上见赠', author:'刘禹锡', dynasty:'唐', content:'巴山楚水凄凉地，二十三年弃置身。\n怀旧空吟闻笛赋，到乡翻似烂柯人。\n沉舟侧畔千帆过，病树前头万木春。\n今日听君歌一曲，暂凭杯酒长精神。' },
+  { title:'雁门太守行', author:'李贺', dynasty:'唐', content:'黑云压城城欲摧，甲光向日金鳞开。\n角声满天秋色里，塞上燕脂凝夜紫。\n半卷红旗临易水，霜重鼓寒声不起。\n报君黄金台上意，提携玉龙为君死。' },
+
+  // ======== 南唐 ========
+  { title:'虞美人', author:'李煜', dynasty:'南唐', content:'春花秋月何时了？往事知多少。\n小楼昨夜又东风，故国不堪回首月明中。\n雕栏玉砌应犹在，只是朱颜改。\n问君能有几多愁？恰似一江春水向东流。' },
+  { title:'相见欢', author:'李煜', dynasty:'南唐', content:'无言独上西楼，月如钩。\n寂寞梧桐深院锁清秋。\n剪不断，理还乱，是离愁。\n别是一般滋味在心头。' },
+  { title:'浪淘沙令', author:'李煜', dynasty:'南唐', content:'帘外雨潺潺，春意阑珊。\n罗衾不耐五更寒。\n梦里不知身是客，一晌贪欢。\n独自莫凭栏，无限江山。\n别时容易见时难。\n流水落花春去也，天上人间。' },
+
+  // ======== 宋代 — 苏轼 ========
+  { title:'水调歌头·明月几时有', author:'苏轼', dynasty:'宋', content:'明月几时有？把酒问青天。\n不知天上宫阙，今夕是何年。\n我欲乘风归去，又恐琼楼玉宇，高处不胜寒。\n起舞弄清影，何似在人间。\n转朱阁，低绮户，照无眠。\n不应有恨，何事长向别时圆？\n人有悲欢离合，月有阴晴圆缺，此事古难全。\n但愿人长久，千里共婵娟。' },
+  { title:'念奴娇·赤壁怀古', author:'苏轼', dynasty:'宋', content:'大江东去，浪淘尽，千古风流人物。\n故垒西边，人道是，三国周郎赤壁。\n乱石穿空，惊涛拍岸，卷起千堆雪。\n江山如画，一时多少豪杰。\n遥想公瑾当年，小乔初嫁了，雄姿英发。\n羽扇纶巾，谈笑间，樯橹灰飞烟灭。\n故国神游，多情应笑我，早生华发。\n人生如梦，一尊还酹江月。' },
+  { title:'江城子·密州出猎', author:'苏轼', dynasty:'宋', content:'老夫聊发少年狂，左牵黄，右擎苍。\n锦帽貂裘，千骑卷平冈。\n为报倾城随太守，亲射虎，看孙郎。\n酒酣胸胆尚开张，鬓微霜，又何妨！\n持节云中，何日遣冯唐？\n会挽雕弓如满月，西北望，射天狼。' },
+  { title:'江城子·乙卯正月二十日夜记梦', author:'苏轼', dynasty:'宋', content:'十年生死两茫茫，不思量，自难忘。\n千里孤坟，无处话凄凉。\n纵使相逢应不识，尘满面，鬓如霜。\n夜来幽梦忽还乡，小轩窗，正梳妆。\n相顾无言，惟有泪千行。\n料得年年肠断处，明月夜，短松冈。' },
+  { title:'定风波', author:'苏轼', dynasty:'宋', content:'莫听穿林打叶声，何妨吟啸且徐行。\n竹杖芒鞋轻胜马，谁怕？一蓑烟雨任平生。\n料峭春风吹酒醒，微冷，山头斜照却相迎。\n回首向来萧瑟处，归去，也无风雨也无晴。' },
+  { title:'蝶恋花·春景', author:'苏轼', dynasty:'宋', content:'花褪残红青杏小。燕子飞时，绿水人家绕。\n枝上柳绵吹又少，天涯何处无芳草。\n墙里秋千墙外道。墙外行人，墙里佳人笑。\n笑渐不闻声渐悄，多情却被无情恼。' },
+  { title:'题西林壁', author:'苏轼', dynasty:'宋', content:'横看成岭侧成峰，远近高低各不同。\n不识庐山真面目，只缘身在此山中。' },
+  { title:'饮湖上初晴后雨', author:'苏轼', dynasty:'宋', content:'水光潋滟晴方好，山色空蒙雨亦奇。\n欲把西湖比西子，淡妆浓抹总相宜。' },
+  { title:'海棠', author:'苏轼', dynasty:'宋', content:'东风袅袅泛崇光，香雾空蒙月转廊。\n只恐夜深花睡去，故烧高烛照红妆。' },
+
+  // ======== 宋代 — 李清照 ========
+  { title:'如梦令·常记溪亭日暮', author:'李清照', dynasty:'宋', content:'常记溪亭日暮，沉醉不知归路。\n兴尽晚回舟，误入藕花深处。\n争渡，争渡，惊起一滩鸥鹭。' },
+  { title:'声声慢', author:'李清照', dynasty:'宋', content:'寻寻觅觅，冷冷清清，凄凄惨惨戚戚。\n乍暖还寒时候，最难将息。\n三杯两盏淡酒，怎敌他、晚来风急？\n雁过也，正伤心，却是旧时相识。\n满地黄花堆积，憔悴损，如今有谁堪摘？\n守着窗儿，独自怎生得黑？\n梧桐更兼细雨，到黄昏、点点滴滴。\n这次第，怎一个愁字了得！' },
+  { title:'一剪梅', author:'李清照', dynasty:'宋', content:'红藕香残玉簟秋。轻解罗裳，独上兰舟。\n云中谁寄锦书来？雁字回时，月满西楼。\n花自飘零水自流。一种相思，两处闲愁。\n此情无计可消除，才下眉头，却上心头。' },
+  { title:'武陵春', author:'李清照', dynasty:'宋', content:'风住尘香花已尽，日晚倦梳头。\n物是人非事事休，欲语泪先流。\n闻说双溪春尚好，也拟泛轻舟。\n只恐双溪舴艋舟，载不动许多愁。' },
+  { title:'醉花阴', author:'李清照', dynasty:'宋', content:'薄雾浓云愁永昼，瑞脑销金兽。\n佳节又重阳，玉枕纱橱，半夜凉初透。\n东篱把酒黄昏后，有暗香盈袖。\n莫道不销魂，帘卷西风，人比黄花瘦。' },
+  { title:'夏日绝句', author:'李清照', dynasty:'宋', content:'生当作人杰，死亦为鬼雄。\n至今思项羽，不肯过江东。' },
+  { title:'如梦令·昨夜雨疏风骤', author:'李清照', dynasty:'宋', content:'昨夜雨疏风骤，浓睡不消残酒。\n试问卷帘人，却道海棠依旧。\n知否，知否？应是绿肥红瘦。' },
+
+  // ======== 宋代 — 辛弃疾 ========
+  { title:'青玉案·元夕', author:'辛弃疾', dynasty:'宋', content:'东风夜放花千树，更吹落，星如雨。\n宝马雕车香满路。\n凤箫声动，玉壶光转，一夜鱼龙舞。\n蛾儿雪柳黄金缕，笑语盈盈暗香去。\n众里寻他千百度，蓦然回首，那人却在，灯火阑珊处。' },
+  { title:'永遇乐·京口北固亭怀古', author:'辛弃疾', dynasty:'宋', content:'千古江山，英雄无觅孙仲谋处。\n舞榭歌台，风流总被雨打风吹去。\n斜阳草树，寻常巷陌，人道寄奴曾住。\n想当年，金戈铁马，气吞万里如虎。\n元嘉草草，封狼居胥，赢得仓皇北顾。\n四十三年，望中犹记，烽火扬州路。\n可堪回首，佛狸祠下，一片神鸦社鼓。\n凭谁问，廉颇老矣，尚能饭否？' },
+  { title:'破阵子·为陈同甫赋壮词以寄之', author:'辛弃疾', dynasty:'宋', content:'醉里挑灯看剑，梦回吹角连营。\n八百里分麾下炙，五十弦翻塞外声，沙场秋点兵。\n马作的卢飞快，弓如霹雳弦惊。\n了却君王天下事，赢得生前身后名。可怜白发生！' },
+  { title:'丑奴儿·书博山道中壁', author:'辛弃疾', dynasty:'宋', content:'少年不识愁滋味，爱上层楼。\n爱上层楼，为赋新词强说愁。\n而今识尽愁滋味，欲说还休。\n欲说还休，却道天凉好个秋。' },
+  { title:'菩萨蛮·书江西造口壁', author:'辛弃疾', dynasty:'宋', content:'郁孤台下清江水，中间多少行人泪。\n西北望长安，可怜无数山。\n青山遮不住，毕竟东流去。\n江晚正愁余，山深闻鹧鸪。' },
+  { title:'西江月·夜行黄沙道中', author:'辛弃疾', dynasty:'宋', content:'明月别枝惊鹊，清风半夜鸣蝉。\n稻花香里说丰年，听取蛙声一片。\n七八个星天外，两三点雨山前。\n旧时茅店社林边，路转溪桥忽见。' },
+  { title:'南乡子·登京口北固亭有怀', author:'辛弃疾', dynasty:'宋', content:'何处望神州？满眼风光北固楼。\n千古兴亡多少事？悠悠。不尽长江滚滚流。\n年少万兜鍪，坐断东南战未休。\n天下英雄谁敌手？曹刘。生子当如孙仲谋。' },
+  { title:'清平乐·村居', author:'辛弃疾', dynasty:'宋', content:'茅檐低小，溪上青青草。\n醉里吴音相媚好，白发谁家翁媪？\n大儿锄豆溪东，中儿正织鸡笼。\n最喜小儿亡赖，溪头卧剥莲蓬。' },
+
+  // ======== 宋代 — 其他名家 ========
+  { title:'雨霖铃', author:'柳永', dynasty:'宋', content:'寒蝉凄切，对长亭晚，骤雨初歇。\n都门帐饮无绪，留恋处，兰舟催发。\n执手相看泪眼，竟无语凝噎。\n念去去，千里烟波，暮霭沉沉楚天阔。\n多情自古伤离别，更那堪，冷落清秋节！\n今宵酒醒何处？杨柳岸，晓风残月。\n此去经年，应是良辰好景虚设。\n便纵有千种风情，更与何人说？' },
+  { title:'满江红', author:'岳飞', dynasty:'宋', content:'怒发冲冠，凭栏处、潇潇雨歇。\n抬望眼，仰天长啸，壮怀激烈。\n三十功名尘与土，八千里路云和月。\n莫等闲，白了少年头，空悲切。\n靖康耻，犹未雪。臣子恨，何时灭！\n驾长车，踏破贺兰山缺。\n壮志饥餐胡虏肉，笑谈渴饮匈奴血。\n待从头，收拾旧山河，朝天阙。' },
+  { title:'钗头凤', author:'陆游', dynasty:'宋', content:'红酥手，黄縢酒，满城春色宫墙柳。\n东风恶，欢情薄。一怀愁绪，几年离索。\n错、错、错。\n春如旧，人空瘦，泪痕红浥鲛绡透。\n桃花落，闲池阁。山盟虽在，锦书难托。\n莫、莫、莫。' },
+  { title:'示儿', author:'陆游', dynasty:'宋', content:'死去元知万事空，但悲不见九州同。\n王师北定中原日，家祭无忘告乃翁。' },
+  { title:'游山西村', author:'陆游', dynasty:'宋', content:'莫笑农家腊酒浑，丰年留客足鸡豚。\n山重水复疑无路，柳暗花明又一村。\n箫鼓追随春社近，衣冠简朴古风存。\n从今若许闲乘月，拄杖无时夜叩门。' },
+  { title:'冬夜读书示子聿', author:'陆游', dynasty:'宋', content:'古人学问无遗力，少壮工夫老始成。\n纸上得来终觉浅，绝知此事要躬行。' },
+  { title:'渔家傲·秋思', author:'范仲淹', dynasty:'宋', content:'塞下秋来风景异，衡阳雁去无留意。\n四面边声连角起，千嶂里，长烟落日孤城闭。\n浊酒一杯家万里，燕然未勒归无计。\n羌管悠悠霜满地，人不寐，将军白发征夫泪。' },
+  { title:'浣溪沙·一曲新词酒一杯', author:'晏殊', dynasty:'宋', content:'一曲新词酒一杯，去年天气旧亭台。\n夕阳西下几时回？\n无可奈何花落去，似曾相识燕归来。\n小园香径独徘徊。' },
+  { title:'蝶恋花·庭院深深深几许', author:'欧阳修', dynasty:'宋', content:'庭院深深深几许，杨柳堆烟，帘幕无重数。\n玉勒雕鞍游冶处，楼高不见章台路。\n雨横风狂三月暮，门掩黄昏，无计留春住。\n泪眼问花花不语，乱红飞过秋千去。' },
+  { title:'鹊桥仙', author:'秦观', dynasty:'宋', content:'纤云弄巧，飞星传恨，银汉迢迢暗度。\n金风玉露一相逢，便胜却人间无数。\n柔情似水，佳期如梦，忍顾鹊桥归路。\n两情若是久长时，又岂在朝朝暮暮。' },
+  { title:'苏幕遮', author:'周邦彦', dynasty:'宋', content:'燎沉香，消溽暑。鸟雀呼晴，侵晓窥檐语。\n叶上初阳干宿雨，水面清圆，一一风荷举。\n故乡遥，何日去？家住吴门，久作长安旅。\n五月渔郎相忆否？小楫轻舟，梦入芙蓉浦。' },
+  { title:'泊船瓜洲', author:'王安石', dynasty:'宋', content:'京口瓜洲一水间，钟山只隔数重山。\n春风又绿江南岸，明月何时照我还？' },
+  { title:'小池', author:'杨万里', dynasty:'宋', content:'泉眼无声惜细流，树阴照水爱晴柔。\n小荷才露尖尖角，早有蜻蜓立上头。' },
+  { title:'春日', author:'朱熹', dynasty:'宋', content:'胜日寻芳泗水滨，无边光景一时新。\n等闲识得东风面，万紫千红总是春。' },
+  { title:'游园不值', author:'叶绍翁', dynasty:'宋', content:'应怜屐齿印苍苔，小扣柴扉久不开。\n春色满园关不住，一枝红杏出墙来。' },
+  { title:'题临安邸', author:'林升', dynasty:'宋', content:'山外青山楼外楼，西湖歌舞几时休？\n暖风熏得游人醉，直把杭州作汴州。' },
+  { title:'过零丁洋', author:'文天祥', dynasty:'宋', content:'辛苦遭逢起一经，干戈寥落四周星。\n山河破碎风飘絮，身世浮沉雨打萍。\n惶恐滩头说惶恐，零丁洋里叹零丁。\n人生自古谁无死？留取丹心照汗青。' },
+  { title:'虞美人·听雨', author:'蒋捷', dynasty:'宋', content:'少年听雨歌楼上，红烛昏罗帐。\n壮年听雨客舟中，江阔云低，断雁叫西风。\n而今听雨僧庐下，鬓已星星也。\n悲欢离合总无情，一任阶前，点滴到天明。' },
+  { title:'扬州慢', author:'姜夔', dynasty:'宋', content:'淮左名都，竹西佳处，解鞍少驻初程。\n过春风十里，尽荠麦青青。\n自胡马窥江去后，废池乔木，犹厌言兵。\n渐黄昏，清角吹寒，都在空城。\n杜郎俊赏，算而今、重到须惊。\n纵豆蔻词工，青楼梦好，难赋深情。\n二十四桥仍在，波心荡、冷月无声。\n念桥边红药，年年知为谁生？' },
+  { title:'卜算子·咏梅', author:'陆游', dynasty:'宋', content:'驿外断桥边，寂寞开无主。\n已是黄昏独自愁，更著风和雨。\n无意苦争春，一任群芳妒。\n零落成泥碾作尘，只有香如故。' },
+  { title:'临江仙', author:'晏几道', dynasty:'宋', content:'梦后楼台高锁，酒醒帘幕低垂。\n去年春恨却来时。\n落花人独立，微雨燕双飞。\n记得小蘋初见，两重心字罗衣。\n琵琶弦上说相思。\n当时明月在，曾照彩云归。' },
+  { title:'梅花', author:'王安石', dynasty:'宋', content:'墙角数枝梅，凌寒独自开。\n遥知不是雪，为有暗香来。' },
+  { title:'晓出净慈寺送林子方', author:'杨万里', dynasty:'宋', content:'毕竟西湖六月中，风光不与四时同。\n接天莲叶无穷碧，映日荷花别样红。' },
+  { title:'观书有感', author:'朱熹', dynasty:'宋', content:'半亩方塘一鉴开，天光云影共徘徊。\n问渠那得清如许？为有源头活水来。' },
+
+  // ======== 元曲 ========
+  { title:'天净沙·秋思', author:'马致远', dynasty:'元', content:'枯藤老树昏鸦，小桥流水人家，古道西风瘦马。\n夕阳西下，断肠人在天涯。' },
+  { title:'山坡羊·潼关怀古', author:'张养浩', dynasty:'元', content:'峰峦如聚，波涛如怒，山河表里潼关路。\n望西都，意踌躇。\n伤心秦汉经行处，宫阙万间都做了土。\n兴，百姓苦；亡，百姓苦。' },
+  { title:'天净沙·秋', author:'白朴', dynasty:'元', content:'孤村落日残霞，轻烟老树寒鸦，一点飞鸿影下。\n青山绿水，白草红叶黄花。' },
+  { title:'墨梅', author:'王冕', dynasty:'元', content:'吾家洗砚池头树，朵朵花开淡墨痕。\n不要人夸好颜色，只留清气满乾坤。' },
+
+  // ======== 明代 ========
+  { title:'石灰吟', author:'于谦', dynasty:'明', content:'千锤万凿出深山，烈火焚烧若等闲。\n粉骨碎身浑不怕，要留清白在人间。' },
+  { title:'临江仙·滚滚长江东逝水', author:'杨慎', dynasty:'明', content:'滚滚长江东逝水，浪花淘尽英雄。\n是非成败转头空。\n青山依旧在，几度夕阳红。\n白发渔樵江渚上，惯看秋月春风。\n一壶浊酒喜相逢。\n古今多少事，都付笑谈中。' },
+  { title:'就义诗', author:'杨继盛', dynasty:'明', content:'浩气还太虚，丹心照千古。\n生平未报国，留作忠魂补。' },
+  { title:'明日歌', author:'钱福', dynasty:'明', content:'明日复明日，明日何其多。\n我生待明日，万事成蹉跎。\n世人苦被明日累，春去秋来老将至。\n朝看水东流，暮看日西坠。\n百年明日能几何？请君听我明日歌。' },
+  { title:'桃花庵歌', author:'唐寅', dynasty:'明', content:'桃花坞里桃花庵，桃花庵下桃花仙。\n桃花仙人种桃树，又摘桃花换酒钱。\n酒醒只在花前坐，酒醉还来花下眠。\n半醒半醉日复日，花落花开年复年。\n但愿老死花酒间，不愿鞠躬车马前。\n车尘马足富者趣，酒盏花枝贫者缘。\n若将富贵比贫贱，一在平地一在天。\n若将贫贱比车马，他得驱驰我得闲。\n别人笑我太疯癫，我笑他人看不穿。\n不见五陵豪杰墓，无花无酒锄作田。' },
+
+  // ======== 清代 ========
+  { title:'长相思', author:'纳兰性德', dynasty:'清', content:'山一程，水一程，身向榆关那畔行，夜深千帐灯。\n风一更，雪一更，聒碎乡心梦不成，故园无此声。' },
+  { title:'木兰词·拟古决绝词柬友', author:'纳兰性德', dynasty:'清', content:'人生若只如初见，何事秋风悲画扇。\n等闲变却故人心，却道故人心易变。\n骊山语罢清宵半，泪雨霖铃终不怨。\n何如薄幸锦衣郎，比翼连枝当日愿。' },
+  { title:'竹石', author:'郑燮', dynasty:'清', content:'咬定青山不放松，立根原在破岩中。\n千磨万击还坚劲，任尔东西南北风。' },
+  { title:'己亥杂诗·其五', author:'龚自珍', dynasty:'清', content:'浩荡离愁白日斜，吟鞭东指即天涯。\n落红不是无情物，化作春泥更护花。' },
+
+  // ======== 近现代诗词经典 ========
+  { title:'沁园春·雪', author:'毛泽东', dynasty:'近现代', content:'北国风光，千里冰封，万里雪飘。\n望长城内外，惟余莽莽；大河上下，顿失滔滔。\n山舞银蛇，原驰蜡象，欲与天公试比高。\n须晴日，看红装素裹，分外妖娆。\n江山如此多娇，引无数英雄竞折腰。\n惜秦皇汉武，略输文采；唐宗宋祖，稍逊风骚。\n一代天骄，成吉思汗，只识弯弓射大雕。\n俱往矣，数风流人物，还看今朝。' },
+  { title:'沁园春·长沙', author:'毛泽东', dynasty:'近现代', content:'独立寒秋，湘江北去，橘子洲头。\n看万山红遍，层林尽染；漫江碧透，百舸争流。\n鹰击长空，鱼翔浅底，万类霜天竞自由。\n怅寥廓，问苍茫大地，谁主沉浮？\n携来百侣曾游，忆往昔峥嵘岁月稠。\n恰同学少年，风华正茂；书生意气，挥斥方遒。\n指点江山，激扬文字，粪土当年万户侯。\n曾记否，到中流击水，浪遏飞舟？' },
+  { title:'再别康桥', author:'徐志摩', dynasty:'近现代', content:'轻轻的我走了，正如我轻轻的来；\n我轻轻的招手，作别西天的云彩。\n那河畔的金柳，是夕阳中的新娘；\n波光里的艳影，在我的心头荡漾。\n软泥上的青荇，油油的在水底招摇；\n在康河的柔波里，我甘心做一条水草。\n那榆荫下的一潭，不是清泉，是天上虹；\n揉碎在浮藻间，沉淀着彩虹似的梦。\n寻梦？撑一支长篙，向青草更青处漫溯；\n满载一船星辉，在星辉斑斓里放歌。\n但我不能放歌，悄悄是别离的笙箫；\n夏虫也为我沉默，沉默是今晚的康桥。\n悄悄的我走了，正如我悄悄的来；\n我挥一挥衣袖，不带走一片云彩。' },
+  { title:'断章', author:'卞之琳', dynasty:'近现代', content:'你站在桥上看风景，\n看风景的人在楼上看你。\n明月装饰了你的窗子，\n你装饰了别人的梦。' },
+  { title:'乡愁', author:'余光中', dynasty:'近现代', content:'小时候，乡愁是一枚小小的邮票，\n我在这头，母亲在那头。\n长大后，乡愁是一张窄窄的船票，\n我在这头，新娘在那头。\n后来啊，乡愁是一方矮矮的坟墓，\n我在外头，母亲在里头。\n而现在，乡愁是一湾浅浅的海峡，\n我在这头，大陆在那头。' },
+  { title:'面朝大海，春暖花开', author:'海子', dynasty:'近现代', content:'从明天起，做一个幸福的人\n喂马，劈柴，周游世界\n从明天起，关心粮食和蔬菜\n我有一所房子，面朝大海，春暖花开\n从明天起，和每一个亲人通信\n告诉他们我的幸福\n那幸福的闪电告诉我的\n我将告诉每一个人\n给每一条河每一座山取一个温暖的名字\n陌生人，我也为你祝福\n愿你有一个灿烂的前程\n愿你有情人终成眷属\n愿你在尘世获得幸福\n我只愿面朝大海，春暖花开。' },
+  { title:'错误', author:'郑愁予', dynasty:'近现代', content:'我打江南走过\n那等在季节里的容颜如莲花的开落\n东风不来，三月的柳絮不飞\n你的心如小小的寂寞的城\n恰若青石的街道向晚\n跫音不响，三月的春帷不揭\n你的心是小小的窗扉紧掩\n我达达的马蹄是美丽的错误\n我不是归人，是个过客。' },
+  { title:'一棵开花的树', author:'席慕容', dynasty:'近现代', content:'如何让你遇见我\n在我最美丽的时刻\n为这\n我已在佛前求了五百年\n求佛让我们结一段尘缘\n佛于是把我化作一棵树\n长在你必经的路旁\n阳光下\n慎重地开满了花\n朵朵都是我前世的盼望\n当你走近\n请你细听\n那颤抖的叶\n是我等待的热情\n而当你终于无视地走过\n在你身后落了一地的\n朋友啊\n那不是花瓣\n是我凋零的心。' },
+  { title:'回答', author:'北岛', dynasty:'近现代', content:'卑鄙是卑鄙者的通行证，\n高尚是高尚者的墓志铭。\n看吧，在那镀金的天空中，\n飘满了死者弯曲的倒影。\n冰川纪过去了，\n为什么到处都是冰凌？\n好望角发现了，\n为什么死海里千帆相竞？\n我来到这个世界上，\n只带着纸、绳索和身影。\n为了在审判之前，\n宣读那些被判决的声音：\n告诉你吧，世界，\n我——不——相——信！' },
+
+  // ======== 补遗 — 唐诗 ========
+  { title:'次北固山下', author:'王湾', dynasty:'唐', content:'客路青山外，行舟绿水前。\n潮平两岸阔，风正一帆悬。\n海日生残夜，江春入旧年。\n乡书何处达？归雁洛阳边。' },
+  { title:'早春呈水部张十八员外', author:'韩愈', dynasty:'唐', content:'天街小雨润如酥，草色遥看近却无。\n最是一年春好处，绝胜烟柳满皇都。' },
+  { title:'逢雪宿芙蓉山主人', author:'刘长卿', dynasty:'唐', content:'日暮苍山远，天寒白屋贫。\n柴门闻犬吠，风雪夜归人。' },
+  { title:'渔歌子', author:'张志和', dynasty:'唐', content:'西塞山前白鹭飞，桃花流水鳜鱼肥。\n青箬笠，绿蓑衣，斜风细雨不须归。' },
+  { title:'塞下曲·其二', author:'卢纶', dynasty:'唐', content:'林暗草惊风，将军夜引弓。\n平明寻白羽，没在石棱中。' },
+  { title:'闻王昌龄左迁龙标遥有此寄', author:'李白', dynasty:'唐', content:'杨花落尽子规啼，闻道龙标过五溪。\n我寄愁心与明月，随君直到夜郎西。' },
+  { title:'赠花卿', author:'杜甫', dynasty:'唐', content:'锦城丝管日纷纷，半入江风半入云。\n此曲只应天上有，人间能得几回闻。' },
+  { title:'江南春', author:'杜牧', dynasty:'唐', content:'千里莺啼绿映红，水村山郭酒旗风。\n南朝四百八十寺，多少楼台烟雨中。' },
+  { title:'乐游原', author:'李商隐', dynasty:'唐', content:'向晚意不适，驱车登古原。\n夕阳无限好，只是近黄昏。' },
+  { title:'凉州词·其一', author:'王之涣', dynasty:'唐', content:'黄河远上白云间，一片孤城万仞山。\n羌笛何须怨杨柳，春风不度玉门关。' },
+
+  // ======== 补遗 — 宋词 ========
+  { title:'四时田园杂兴·其二十五', author:'范成大', dynasty:'宋', content:'梅子金黄杏子肥，麦花雪白菜花稀。\n日长篱落无人过，惟有蜻蜓蛱蝶飞。' },
+  { title:'山园小梅', author:'林逋', dynasty:'宋', content:'众芳摇落独暄妍，占尽风情向小园。\n疏影横斜水清浅，暗香浮动月黄昏。\n霜禽欲下先偷眼，粉蝶如知合断魂。\n幸有微吟可相狎，不须檀板共金樽。' },
+  { title:'惠崇春江晚景', author:'苏轼', dynasty:'宋', content:'竹外桃花三两枝，春江水暖鸭先知。\n蒌蒿满地芦芽短，正是河豚欲上时。' },
+  { title:'十一月四日风雨大作', author:'陆游', dynasty:'宋', content:'僵卧孤村不自哀，尚思为国戍轮台。\n夜阑卧听风吹雨，铁马冰河入梦来。' },
+  { title:'元日', author:'王安石', dynasty:'宋', content:'爆竹声中一岁除，春风送暖入屠苏。\n千门万户曈曈日，总把新桃换旧符。' },
+  { title:'春日偶成', author:'程颢', dynasty:'宋', content:'云淡风轻近午天，傍花随柳过前川。\n时人不识余心乐，将谓偷闲学少年。' },
+  { title:'点绛唇·蹴罢秋千', author:'李清照', dynasty:'宋', content:'蹴罢秋千，起来慵整纤纤手。\n露浓花瘦，薄汗轻衣透。\n见客入来，袜刬金钗溜。\n和羞走，倚门回首，却把青梅嗅。' },
+  { title:'浣溪沙·游蕲水清泉寺', author:'苏轼', dynasty:'宋', content:'山下兰芽短浸溪，松间沙路净无泥，萧萧暮雨子规啼。\n谁道人生无再少？门前流水尚能西！休将白发唱黄鸡。' },
+
+  // ======== 补遗 — 元明清及近现代 ========
+  { title:'寿阳曲·潇湘夜雨', author:'马致远', dynasty:'元', content:'渔灯暗，客梦回，一声声滴人心碎。\n孤舟五更家万里，是离人几行情泪。' },
+  { title:'画鸡', author:'唐寅', dynasty:'明', content:'头上红冠不用裁，满身雪白走将来。\n平生不敢轻言语，一叫千门万户开。' },
+  { title:'所见', author:'袁枚', dynasty:'清', content:'牧童骑黄牛，歌声振林樾。\n意欲捕鸣蝉，忽然闭口立。' },
+  { title:'村居', author:'高鼎', dynasty:'清', content:'草长莺飞二月天，拂堤杨柳醉春烟。\n儿童散学归来早，忙趁东风放纸鸢。' },
+  { title:'舟夜书所见', author:'查慎行', dynasty:'清', content:'月黑见渔灯，孤光一点萤。\n微微风簇浪，散作满河星。' },
+  { title:'己亥杂诗·其一百二十五', author:'龚自珍', dynasty:'清', content:'九州生气恃风雷，万马齐喑究可哀。\n我劝天公重抖擞，不拘一格降人才。' },
+  { title:'偶然', author:'徐志摩', dynasty:'近现代', content:'我是天空里的一片云，\n偶尔投影在你的波心——\n你不必讶异，更无须欢喜——\n在转瞬间消灭了踪影。\n你我相逢在黑夜的海上，\n你有你的，我有我的，方向；\n你记得也好，最好你忘掉，\n在这交会时互放的光亮！' },
+  { title:'我爱这土地', author:'艾青', dynasty:'近现代', content:'假如我是一只鸟，\n我也应该用嘶哑的喉咙歌唱：\n这被暴风雨所打击着的土地，\n这永远汹涌着我们的悲愤的河流，\n这无止息地吹刮着的激怒的风，\n和那来自林间的无比温柔的黎明……\n——然后我死了，\n连羽毛也腐烂在土地里面。\n为什么我的眼里常含泪水？\n因为我对这土地爱得深沉……' },
+
+  // ======== 扩编 — 唐诗三百首补遗 ========
+  { title:'登太白峰', author:'李白', dynasty:'唐', content:'西上太白峰，夕阳穷登攀。\n太白与我语，为我开天关。\n愿乘泠风去，直出浮云间。\n举手可近月，前行若无山。\n一别咸阳去，何时复更还？' },
+  { title:'秋浦歌·其十五', author:'李白', dynasty:'唐', content:'白发三千丈，缘愁似个长。\n不知明镜里，何处得秋霜。' },
+  { title:'峨眉山月歌', author:'李白', dynasty:'唐', content:'峨眉山月半轮秋，影入平羌江水流。\n夜发清溪向三峡，思君不见下渝州。' },
+  { title:'渡荆门送别', author:'李白', dynasty:'唐', content:'渡远荆门外，来从楚国游。\n山随平野尽，江入大荒流。\n月下飞天镜，云生结海楼。\n仍怜故乡水，万里送行舟。' },
+  { title:'春思', author:'李白', dynasty:'唐', content:'燕草如碧丝，秦桑低绿枝。\n当君怀归日，是妾断肠时。\n春风不相识，何事入罗帏？' },
+  { title:'子夜吴歌·秋歌', author:'李白', dynasty:'唐', content:'长安一片月，万户捣衣声。\n秋风吹不尽，总是玉关情。\n何日平胡虏，良人罢远征？' },
+  { title:'长相思·其一', author:'李白', dynasty:'唐', content:'长相思，在长安。\n络纬秋啼金井阑，微霜凄凄簟色寒。\n孤灯不明思欲绝，卷帷望月空长叹。\n美人如花隔云端。\n上有青冥之长天，下有渌水之波澜。\n天长路远魂飞苦，梦魂不到关山难。\n长相思，摧心肝。' },
+  { title:'玉阶怨', author:'李白', dynasty:'唐', content:'玉阶生白露，夜久侵罗袜。\n却下水晶帘，玲珑望秋月。' },
+  { title:'山中与幽人对酌', author:'李白', dynasty:'唐', content:'两人对酌山花开，一杯一杯复一杯。\n我醉欲眠卿且去，明朝有意抱琴来。' },
+  { title:'客中行', author:'李白', dynasty:'唐', content:'兰陵美酒郁金香，玉碗盛来琥珀光。\n但使主人能醉客，不知何处是他乡。' },
+  { title:'清平调·其一', author:'李白', dynasty:'唐', content:'云想衣裳花想容，春风拂槛露华浓。\n若非群玉山头见，会向瑶台月下逢。' },
+  { title:'清平调·其二', author:'李白', dynasty:'唐', content:'一枝红艳露凝香，云雨巫山枉断肠。\n借问汉宫谁得似，可怜飞燕倚新妆。' },
+  { title:'清平调·其三', author:'李白', dynasty:'唐', content:'名花倾国两相欢，长得君王带笑看。\n解释春风无限恨，沉香亭北倚阑干。' },
+  { title:'前出塞·其六', author:'杜甫', dynasty:'唐', content:'挽弓当挽强，用箭当用长。\n射人先射马，擒贼先擒王。\n杀人亦有限，列国自有疆。\n苟能制侵陵，岂在多杀伤。' },
+  { title:'八阵图', author:'杜甫', dynasty:'唐', content:'功盖三分国，名成八阵图。\n江流石不转，遗恨失吞吴。' },
+  { title:'曲江·其二', author:'杜甫', dynasty:'唐', content:'朝回日日典春衣，每日江头尽醉归。\n酒债寻常行处有，人生七十古来稀。\n穿花蛱蝶深深见，点水蜻蜓款款飞。\n传语风光共流转，暂时相赏莫相违。' },
+  { title:'登楼', author:'杜甫', dynasty:'唐', content:'花近高楼伤客心，万方多难此登临。\n锦江春色来天地，玉垒浮云变古今。\n北极朝廷终不改，西山寇盗莫相侵。\n可怜后主还祠庙，日暮聊为梁甫吟。' },
+  { title:'阁夜', author:'杜甫', dynasty:'唐', content:'岁暮阴阳催短景，天涯霜雪霁寒宵。\n五更鼓角声悲壮，三峡星河影动摇。\n野哭千家闻战伐，夷歌数处起渔樵。\n卧龙跃马终黄土，人事音书漫寂寥。' },
+  { title:'咏怀古迹·其三', author:'杜甫', dynasty:'唐', content:'群山万壑赴荆门，生长明妃尚有村。\n一去紫台连朔漠，独留青冢向黄昏。\n画图省识春风面，环佩空归夜月魂。\n千载琵琶作胡语，分明怨恨曲中论。' },
+  { title:'野望', author:'杜甫', dynasty:'唐', content:'西山白雪三城戍，南浦清江万里桥。\n海内风尘诸弟隔，天涯涕泪一身遥。\n惟将迟暮供多病，未有涓埃答圣朝。\n跨马出郊时极目，不堪人事日萧条。' },
+  { title:'春宿左省', author:'杜甫', dynasty:'唐', content:'花隐掖垣暮，啾啾栖鸟过。\n星临万户动，月傍九霄多。\n不寝听金钥，因风想玉珂。\n明朝有封事，数问夜如何。' },
+  { title:'天末怀李白', author:'杜甫', dynasty:'唐', content:'凉风起天末，君子意如何。\n鸿雁几时到，江湖秋水多。\n文章憎命达，魑魅喜人过。\n应共冤魂语，投诗赠汨罗。' },
+  { title:'月夜', author:'杜甫', dynasty:'唐', content:'今夜鄜州月，闺中只独看。\n遥怜小儿女，未解忆长安。\n香雾云鬟湿，清辉玉臂寒。\n何时倚虚幌，双照泪痕干。' },
+  { title:'赠卫八处士', author:'杜甫', dynasty:'唐', content:'人生不相见，动如参与商。\n今夕复何夕，共此灯烛光。\n少壮能几时，鬓发各已苍。\n访旧半为鬼，惊呼热中肠。\n焉知二十载，重上君子堂。\n昔别君未婚，儿女忽成行。\n怡然敬父执，问我来何方。\n问答乃未已，驱儿罗酒浆。\n夜雨剪春韭，新炊间黄粱。\n主称会面难，一举累十觞。\n十觞亦不醉，感子故意长。\n明日隔山岳，世事两茫茫。' },
+  { title:'渭川田家', author:'王维', dynasty:'唐', content:'斜阳照墟落，穷巷牛羊归。\n野老念牧童，倚杖候荆扉。\n雉雊麦苗秀，蚕眠桑叶稀。\n田夫荷锄至，相见语依依。\n即此羡闲逸，怅然吟式微。' },
+  { title:'山中', author:'王维', dynasty:'唐', content:'荆溪白石出，天寒红叶稀。\n山路元无雨，空翠湿人衣。' },
+  { title:'送别', author:'王维', dynasty:'唐', content:'山中相送罢，日暮掩柴扉。\n春草明年绿，王孙归不归？' },
+  { title:'辋川闲居赠裴秀才迪', author:'王维', dynasty:'唐', content:'寒山转苍翠，秋水日潺湲。\n倚杖柴门外，临风听暮蝉。\n渡头余落日，墟里上孤烟。\n复值接舆醉，狂歌五柳前。' },
+  { title:'汉江临眺', author:'王维', dynasty:'唐', content:'楚塞三湘接，荆门九派通。\n江流天地外，山色有无中。\n郡邑浮前浦，波澜动远空。\n襄阳好风日，留醉与山翁。' },
+  { title:'观猎', author:'王维', dynasty:'唐', content:'风劲角弓鸣，将军猎渭城。\n草枯鹰眼疾，雪尽马蹄轻。\n忽过新丰市，还归细柳营。\n回看射雕处，千里暮云平。' },
+  { title:'过故人庄', author:'孟浩然', dynasty:'唐', content:'故人具鸡黍，邀我至田家。\n绿树村边合，青山郭外斜。\n开轩面场圃，把酒话桑麻。\n待到重阳日，还来就菊花。' },
+  { title:'宿建德江', author:'孟浩然', dynasty:'唐', content:'移舟泊烟渚，日暮客愁新。\n野旷天低树，江清月近人。' },
+  { title:'望洞庭湖赠张丞相', author:'孟浩然', dynasty:'唐', content:'八月湖水平，涵虚混太清。\n气蒸云梦泽，波撼岳阳城。\n欲济无舟楫，端居耻圣明。\n坐观垂钓者，徒有羡鱼情。' },
+  { title:'岁暮归南山', author:'孟浩然', dynasty:'唐', content:'北阙休上书，南山归敝庐。\n不才明主弃，多病故人疏。\n白发催年老，青阳逼岁除。\n永怀愁不寐，松月夜窗虚。' },
+  { title:'早寒有怀', author:'孟浩然', dynasty:'唐', content:'木落雁南度，北风江上寒。\n我家襄水上，遥隔楚云端。\n乡泪客中尽，孤帆天际看。\n迷津欲有问，平海夕漫漫。' },
+  { title:'与诸子登岘山', author:'孟浩然', dynasty:'唐', content:'人事有代谢，往来成古今。\n江山留胜迹，我辈复登临。\n水落鱼梁浅，天寒梦泽深。\n羊公碑尚在，读罢泪沾襟。' },
+  { title:'观刈麦', author:'白居易', dynasty:'唐', content:'田家少闲月，五月人倍忙。\n夜来南风起，小麦覆陇黄。\n妇姑荷箪食，童稚携壶浆。\n相随饷田去，丁壮在南冈。\n足蒸暑土气，背灼炎天光。\n力尽不知热，但惜夏日长。\n复有贫妇人，抱子在其旁。\n右手秉遗穗，左臂悬敝筐。\n听其相顾言，闻者为悲伤。\n家田输税尽，拾此充饥肠。\n今我何功德，曾不事农桑。\n吏禄三百石，岁晏有余粮。\n念此私自愧，尽日不能忘。' },
+  { title:'卖炭翁', author:'白居易', dynasty:'唐', content:'卖炭翁，伐薪烧炭南山中。\n满面尘灰烟火色，两鬓苍苍十指黑。\n卖炭得钱何所营？身上衣裳口中食。\n可怜身上衣正单，心忧炭贱愿天寒。\n夜来城外一尺雪，晓驾炭车辗冰辙。\n牛困人饥日已高，市南门外泥中歇。\n翩翩两骑来是谁？黄衣使者白衫儿。\n手把文书口称敕，回车叱牛牵向北。\n一车炭，千余斤，宫使驱将惜不得。\n半匹红纱一丈绫，系向牛头充炭直。' },
+  { title:'村夜', author:'白居易', dynasty:'唐', content:'霜草苍苍虫切切，村南村北行人绝。\n独出门前望野田，月明荞麦花如雪。' },
+  { title:'邯郸冬至夜思家', author:'白居易', dynasty:'唐', content:'邯郸驿里逢冬至，抱膝灯前影伴身。\n想得家中夜深坐，还应说著远行人。' },
+  { title:'夜雪', author:'白居易', dynasty:'唐', content:'已讶衾枕冷，复见窗户明。\n夜深知雪重，时闻折竹声。' },
+  { title:'花非花', author:'白居易', dynasty:'唐', content:'花非花，雾非雾。\n夜半来，天明去。\n来如春梦几多时？\n去似朝云无觅处。' },
+  { title:'赠别·其二', author:'杜牧', dynasty:'唐', content:'多情却似总无情，唯觉樽前笑不成。\n蜡烛有心还惜别，替人垂泪到天明。' },
+  { title:'过华清宫', author:'杜牧', dynasty:'唐', content:'长安回望绣成堆，山顶千门次第开。\n一骑红尘妃子笑，无人知是荔枝来。' },
+  { title:'金谷园', author:'杜牧', dynasty:'唐', content:'繁华事散逐香尘，流水无情草自春。\n日暮东风怨啼鸟，落花犹似坠楼人。' },
+  { title:'寄扬州韩绰判官', author:'杜牧', dynasty:'唐', content:'青山隐隐水迢迢，秋尽江南草未凋。\n二十四桥明月夜，玉人何处教吹箫？' },
+  { title:'嫦娥', author:'李商隐', dynasty:'唐', content:'云母屏风烛影深，长河渐落晓星沉。\n嫦娥应悔偷灵药，碧海青天夜夜心。' },
+  { title:'贾生', author:'李商隐', dynasty:'唐', content:'宣室求贤访逐臣，贾生才调更无伦。\n可怜夜半虚前席，不问苍生问鬼神。' },
+  { title:'霜月', author:'李商隐', dynasty:'唐', content:'初闻征雁已无蝉，百尺楼高水接天。\n青女素娥俱耐冷，月中霜里斗婵娟。' },
+  { title:'隋宫', author:'李商隐', dynasty:'唐', content:'乘兴南游不戒严，九重谁省谏书函。\n春风举国裁宫锦，半作障泥半作帆。' },
+  { title:'为有', author:'李商隐', dynasty:'唐', content:'为有云屏无限娇，凤城寒尽怕春宵。\n无端嫁得金龟婿，辜负香衾事早朝。' },
+  { title:'瑶池', author:'李商隐', dynasty:'唐', content:'瑶池阿母绮窗开，黄竹歌声动地哀。\n八骏日行三万里，穆王何事不重来？' },
+  { title:'送友人', author:'李白', dynasty:'唐', content:'青山横北郭，白水绕东城。\n此地一为别，孤蓬万里征。\n浮云游子意，落日故人情。\n挥手自兹去，萧萧班马鸣。' },
+  { title:'听蜀僧濬弹琴', author:'李白', dynasty:'唐', content:'蜀僧抱绿绮，西下峨眉峰。\n为我一挥手，如听万壑松。\n客心洗流水，余响入霜钟。\n不觉碧山暮，秋云暗几重。' },
+  { title:'夜泊牛渚怀古', author:'李白', dynasty:'唐', content:'牛渚西江夜，青天无片云。\n登舟望秋月，空忆谢将军。\n余亦能高咏，斯人不可闻。\n明朝挂帆席，枫叶落纷纷。' },
+  { title:'塞下曲·其一', author:'王昌龄', dynasty:'唐', content:'蝉鸣空桑林，八月萧关道。\n出塞入塞寒，处处黄芦草。\n从来幽并客，皆共尘沙老。\n莫学游侠儿，矜夸紫骝好。' },
+  { title:'塞下曲·其二', author:'王昌龄', dynasty:'唐', content:'饮马渡秋水，水寒风似刀。\n平沙日未没，黯黯见临洮。\n昔日长城战，咸言意气高。\n黄尘足今古，白骨乱蓬蒿。' },
+  { title:'长信怨', author:'王昌龄', dynasty:'唐', content:'奉帚平明金殿开，暂将团扇共徘徊。\n玉颜不及寒鸦色，犹带昭阳日影来。' },
+  { title:'春泛若耶溪', author:'綦毋潜', dynasty:'唐', content:'幽意无断绝，此去随所偶。\n晚风吹行舟，花路入溪口。\n际夜转西壑，隔山望南斗。\n潭烟飞溶溶，林月低向后。\n生事且弥漫，愿为持竿叟。' },
+  { title:'宿王昌龄隐居', author:'常建', dynasty:'唐', content:'清溪深不测，隐处唯孤云。\n松际露微月，清光犹为君。\n茅亭宿花影，药院滋苔纹。\n余亦谢时去，西山鸾鹤群。' },
+  { title:'秋登兰山寄张五', author:'孟浩然', dynasty:'唐', content:'北山白云里，隐者自怡悦。\n相望试登高，心随雁飞灭。\n愁因薄暮起，兴是清秋发。\n时见归村人，沙行渡头歇。\n天边树若荠，江畔洲如月。\n何当载酒来，共醉重阳节。' },
+  { title:'夏日南亭怀辛大', author:'孟浩然', dynasty:'唐', content:'山光忽西落，池月渐东上。\n散发乘夕凉，开轩卧闲敞。\n荷风送香气，竹露滴清响。\n欲取鸣琴弹，恨无知音赏。\n感此怀故人，中宵劳梦想。' },
+  { title:'初发扬子寄元大校书', author:'韦应物', dynasty:'唐', content:'凄凄去亲爱，泛泛入烟雾。\n归棹洛阳人，残钟广陵树。\n今朝此为别，何处还相遇。\n世事波上舟，沿洄安得住。' },
+  { title:'寄全椒山中道士', author:'韦应物', dynasty:'唐', content:'今朝郡斋冷，忽念山中客。\n涧底束荆薪，归来煮白石。\n欲持一瓢酒，远慰风雨夕。\n落叶满空山，何处寻行迹。' },
+  { title:'长安遇冯著', author:'韦应物', dynasty:'唐', content:'客从东方来，衣上灞陵雨。\n问客何为来，采山因买斧。\n冥冥花正开，飏飏燕新乳。\n昨别今已春，鬓丝生几缕。' },
+  { title:'夕次盱眙县', author:'韦应物', dynasty:'唐', content:'落帆逗淮镇，停舫临孤驿。\n浩浩风起波，冥冥日沉夕。\n人归山郭暗，雁下芦洲白。\n独夜忆秦关，听钟未眠客。' },
+  { title:'东郊', author:'韦应物', dynasty:'唐', content:'吏舍跼终年，出郊旷清曙。\n杨柳散和风，青山澹吾虑。\n依丛适自憩，缘涧还复去。\n微雨霭芳原，春鸠鸣何处。\n乐幽心屡止，遵事迹犹遽。\n终罢斯结庐，慕陶真可庶。' },
+  { title:'听弹琴', author:'刘长卿', dynasty:'唐', content:'泠泠七弦上，静听松风寒。\n古调虽自爱，今人多不弹。' },
+  { title:'送灵澈上人', author:'刘长卿', dynasty:'唐', content:'苍苍竹林寺，杳杳钟声晚。\n荷笠带斜阳，青山独归远。' },
+  { title:'饯别王十一南游', author:'刘长卿', dynasty:'唐', content:'望君烟水阔，挥手泪沾巾。\n飞鸟没何处，青山空向人。\n长江一帆远，落日五湖春。\n谁见汀洲上，相思愁白蘋。' },
+  { title:'弹琴', author:'刘长卿', dynasty:'唐', content:'泠泠七弦上，静听松风寒。\n古调虽自爱，今人多不弹。' },
+  { title:'送上人', author:'刘长卿', dynasty:'唐', content:'孤云将野鹤，岂向人间住。\n莫买沃洲山，时人已知处。' },
+  { title:'蜀先主庙', author:'刘禹锡', dynasty:'唐', content:'天下英雄气，千秋尚凛然。\n势分三足鼎，业复五铢钱。\n得相能开国，生儿不象贤。\n凄凉蜀故妓，来舞魏宫前。' },
+  { title:'西塞山怀古', author:'刘禹锡', dynasty:'唐', content:'王濬楼船下益州，金陵王气黯然收。\n千寻铁锁沉江底，一片降幡出石头。\n人世几回伤往事，山形依旧枕寒流。\n今逢四海为家日，故垒萧萧芦荻秋。' },
+  { title:'竹枝词·其一', author:'刘禹锡', dynasty:'唐', content:'杨柳青青江水平，闻郎江上踏歌声。\n东边日出西边雨，道是无晴却有晴。' },
+  { title:'秋词', author:'刘禹锡', dynasty:'唐', content:'自古逢秋悲寂寥，我言秋日胜春朝。\n晴空一鹤排云上，便引诗情到碧霄。' },
+  { title:'浪淘沙·其一', author:'刘禹锡', dynasty:'唐', content:'九曲黄河万里沙，浪淘风簸自天涯。\n如今直上银河去，同到牵牛织女家。' },
+  { title:'望洞庭', author:'刘禹锡', dynasty:'唐', content:'湖光秋月两相和，潭面无风镜未磨。\n遥望洞庭山水翠，白银盘里一青螺。' },
+  { title:'经杜甫旧宅', author:'雍陶', dynasty:'唐', content:'浣花溪里花饶笑，肯信吾兼吏隐名。' },
+  { title:'渡汉江', author:'宋之问', dynasty:'唐', content:'岭外音书断，经冬复历春。\n近乡情更怯，不敢问来人。' },
+  { title:'登乐游原', author:'李商隐', dynasty:'唐', content:'向晚意不适，驱车登古原。\n夕阳无限好，只是近黄昏。' },
+  { title:'竹里馆', author:'王维', dynasty:'唐', content:'独坐幽篁里，弹琴复长啸。\n深林人不知，明月来相照。' },
+  { title:'杂诗', author:'王维', dynasty:'唐', content:'君自故乡来，应知故乡事。\n来日绮窗前，寒梅著花未？' },
+  { title:'辛夷坞', author:'王维', dynasty:'唐', content:'木末芙蓉花，山中发红萼。\n涧户寂无人，纷纷开且落。' },
+  { title:'漆园', author:'王维', dynasty:'唐', content:'古人非傲吏，自阙经世务。\n偶寄一微官，婆娑数株树。' },
+  { title:'酬张少府', author:'王维', dynasty:'唐', content:'晚年唯好静，万事不关心。\n自顾无长策，空知返旧林。\n松风吹解带，山月照弹琴。\n君问穷通理，渔歌入浦深。' },
+  { title:'过香积寺', author:'王维', dynasty:'唐', content:'不知香积寺，数里入云峰。\n古木无人径，深山何处钟。\n泉声咽危石，日色冷青松。\n薄暮空潭曲，安禅制毒龙。' },
+  { title:'终南山', author:'王维', dynasty:'唐', content:'太乙近天都，连山接海隅。\n白云回望合，青霭入看无。\n分野中峰变，阴晴众壑殊。\n欲投人处宿，隔水问樵夫。' },
+  { title:'归嵩山作', author:'王维', dynasty:'唐', content:'清川带长薄，车马去闲闲。\n流水如有意，暮禽相与还。\n荒城临古渡，落日满秋山。\n迢递嵩高下，归来且闭关。' },
+  { title:'采莲曲', author:'王昌龄', dynasty:'唐', content:'荷叶罗裙一色裁，芙蓉向脸两边开。\n乱入池中看不见，闻歌始觉有人来。' },
+  { title:'从军行·其四', author:'王昌龄', dynasty:'唐', content:'青海长云暗雪山，孤城遥望玉门关。\n黄沙百战穿金甲，不破楼兰终不还。' },
+  { title:'闺怨', author:'王昌龄', dynasty:'唐', content:'闺中少妇不知愁，春日凝妆上翠楼。\n忽见陌头杨柳色，悔教夫婿觅封侯。' },
+  { title:'春宫曲', author:'王昌龄', dynasty:'唐', content:'昨夜风开露井桃，未央前殿月轮高。\n平阳歌舞新承宠，帘外春寒赐锦袍。' },
+  { title:'送魏万之京', author:'李颀', dynasty:'唐', content:'朝闻游子唱离歌，昨夜微霜初渡河。\n鸿雁不堪愁里听，云山况是客中过。\n关城树色催寒近，御苑砧声向晚多。\n莫见长安行乐处，空令岁月易蹉跎。' },
+  { title:'古意', author:'李颀', dynasty:'唐', content:'男儿事长征，少小幽燕客。\n赌胜马蹄下，由来轻七尺。\n杀人莫敢前，须如猬毛磔。\n黄云陇底白云飞，未得报恩不得归。\n辽东小妇年十五，惯弹琵琶解歌舞。\n今为羌笛出塞声，使我三军泪如雨。' },
+  { title:'听安万善吹觱篥歌', author:'李颀', dynasty:'唐', content:'南山截竹为觱篥，此乐本自龟兹出。\n流传汉地曲转奇，凉州胡人为我吹。\n旁邻闻者多叹息，远客思乡皆泪垂。\n世人解听不解赏，长飙风中自来往。\n枯桑老柏寒飕飗，九雏鸣凤乱啾啾。\n龙吟虎啸一时发，万籁百泉相与秋。\n忽然更作渔阳掺，黄云萧条白日暗。\n变调如闻杨柳春，上林繁花照眼新。\n岁夜高堂列明烛，美酒一杯声一曲。' },
+  { title:'望蓟门', author:'祖咏', dynasty:'唐', content:'燕台一望客心惊，箫鼓喧喧汉将营。\n万里寒光生积雪，三边曙色动危旌。\n沙场烽火侵胡月，海畔云山拥蓟城。\n少小虽非投笔吏，论功还欲请长缨。' },
+  { title:'终南望余雪', author:'祖咏', dynasty:'唐', content:'终南阴岭秀，积雪浮云端。\n林表明霁色，城中增暮寒。' },
+  { title:'苏武庙', author:'温庭筠', dynasty:'唐', content:'苏武魂销汉使前，古祠高树两茫然。\n云边雁断胡天月，陇上羊归塞草烟。\n回日楼台非甲帐，去时冠剑是丁年。\n茂陵不见封侯印，空向秋波哭逝川。' },
+  { title:'商山早行', author:'温庭筠', dynasty:'唐', content:'晨起动征铎，客行悲故乡。\n鸡声茅店月，人迹板桥霜。\n槲叶落山路，枳花明驿墙。\n因思杜陵梦，凫雁满回塘。' },
+  { title:'马嵬坡', author:'郑畋', dynasty:'唐', content:'玄宗回马杨妃死，云雨难忘日月新。\n终是圣明天子事，景阳宫井又何人。' },
+  { title:'金陵图', author:'韦庄', dynasty:'唐', content:'江雨霏霏江草齐，六朝如梦鸟空啼。\n无情最是台城柳，依旧烟笼十里堤。' },
+  { title:'台城', author:'韦庄', dynasty:'唐', content:'江雨霏霏江草齐，六朝如梦鸟空啼。\n无情最是台城柳，依旧烟笼十里堤。' },
+  { title:'章台夜思', author:'韦庄', dynasty:'唐', content:'清瑟怨遥夜，绕弦风雨哀。\n孤灯闻楚角，残月下章台。\n芳草已云暮，故人殊未来。\n乡书不可寄，秋雁又南回。' },
+  { title:'遣怀', author:'杜牧', dynasty:'唐', content:'落魄江湖载酒行，楚腰纤细掌中轻。\n十年一觉扬州梦，赢得青楼薄幸名。' },
+  { title:'秋夕', author:'杜牧', dynasty:'唐', content:'银烛秋光冷画屏，轻罗小扇扑流萤。\n天阶夜色凉如水，卧看牵牛织女星。' },
+  { title:'赠别·其一', author:'杜牧', dynasty:'唐', content:'娉娉袅袅十三余，豆蔻梢头二月初。\n春风十里扬州路，卷上珠帘总不如。' },
+  { title:'叹花', author:'杜牧', dynasty:'唐', content:'自是寻春去校迟，不须惆怅怨芳时。\n狂风落尽深红色，绿叶成阴子满枝。' },
+  { title:'登柳州城楼寄漳汀封连四州', author:'柳宗元', dynasty:'唐', content:'城上高楼接大荒，海天愁思正茫茫。\n惊风乱飐芙蓉水，密雨斜侵薜荔墙。\n岭树重遮千里目，江流曲似九回肠。\n共来百越文身地，犹自音书滞一乡。' },
+  { title:'渔翁', author:'柳宗元', dynasty:'唐', content:'渔翁夜傍西岩宿，晓汲清湘燃楚竹。\n烟销日出不见人，欸乃一声山水绿。\n回看天际下中流，岩上无心云相逐。' },
+  { title:'古风·其一', author:'李白', dynasty:'唐', content:'大雅久不作，吾衰竟谁陈。\n王风委蔓草，战国多荆榛。\n龙虎相啖食，兵戈逮狂秦。\n正声何微茫，哀怨起骚人。\n扬马激颓波，开流荡无垠。\n废兴虽万变，宪章亦已沦。\n自从建安来，绮丽不足珍。\n圣代复元古，垂衣贵清真。\n群才属休明，乘运共跃鳞。\n文质相炳焕，众星罗秋旻。\n我志在删述，垂辉映千春。\n希圣如有立，绝笔于获麟。' },
+
+  // ======== 扩编 — 宋词三百首补遗 ========
+  { title:'临江仙·夜饮东坡醒复醉', author:'苏轼', dynasty:'宋', content:'夜饮东坡醒复醉，归来仿佛三更。\n家童鼻息已雷鸣。\n敲门都不应，倚杖听江声。\n长恨此身非我有，何时忘却营营。\n夜阑风静縠纹平。\n小舟从此逝，江海寄余生。' },
+  { title:'卜算子·黄州定慧院寓居作', author:'苏轼', dynasty:'宋', content:'缺月挂疏桐，漏断人初静。\n时见幽人独往来，缥缈孤鸿影。\n惊起却回头，有恨无人省。\n拣尽寒枝不肯栖，寂寞沙洲冷。' },
+  { title:'和子由渑池怀旧', author:'苏轼', dynasty:'宋', content:'人生到处知何似，应似飞鸿踏雪泥。\n泥上偶然留指爪，鸿飞那复计东西。\n老僧已死成新塔，坏壁无由见旧题。\n往日崎岖还记否，路长人困蹇驴嘶。' },
+  { title:'六月二十日夜渡海', author:'苏轼', dynasty:'宋', content:'参横斗转欲三更，苦雨终风也解晴。\n云散月明谁点缀？天容海色本澄清。\n空余鲁叟乘桴意，粗识轩辕奏乐声。\n九死南荒吾不恨，兹游奇绝冠平生。' },
+  { title:'望江南·超然台作', author:'苏轼', dynasty:'宋', content:'春未老，风细柳斜斜。\n试上超然台上看，半壕春水一城花。\n烟雨暗千家。\n寒食后，酒醒却咨嗟。\n休对故人思故国，且将新火试新茶。\n诗酒趁年华。' },
+  { title:'行香子·过七里濑', author:'苏轼', dynasty:'宋', content:'一叶舟轻，双桨鸿惊。\n水天清、影湛波平。\n鱼翻藻鉴，鹭点烟汀。\n过沙溪急，霜溪冷，月溪明。\n重重似画，曲曲如屏。\n算当年、虚老严陵。\n君臣一梦，今古空名。\n但远山长，云山乱，晓山青。' },
+  { title:'西江月·世事一场大梦', author:'苏轼', dynasty:'宋', content:'世事一场大梦，人生几度秋凉？\n夜来风叶已鸣廊。看取眉头鬓上。\n酒贱常愁客少，月明多被云妨。\n中秋谁与共孤光。把盏凄然北望。' },
+  { title:'洞仙歌', author:'苏轼', dynasty:'宋', content:'冰肌玉骨，自清凉无汗。\n水殿风来暗香满。\n绣帘开，一点明月窥人，人未寝，欹枕钗横鬓乱。\n起来携素手，庭户无声，时见疏星渡河汉。\n试问夜如何？夜已三更，金波淡、玉绳低转。\n但屈指、西风几时来，又不道、流年暗中偷换。' },
+  { title:'点绛唇·蹴罢秋千', author:'李清照', dynasty:'宋', content:'蹴罢秋千，起来慵整纤纤手。\n露浓花瘦，薄汗轻衣透。\n见客入来，袜刬金钗溜。\n和羞走，倚门回首，却把青梅嗅。' },
+  { title:'渔家傲·天接云涛连晓雾', author:'李清照', dynasty:'宋', content:'天接云涛连晓雾，星河欲转千帆舞。\n仿佛梦魂归帝所。\n闻天语，殷勤问我归何处。\n我报路长嗟日暮，学诗谩有惊人句。\n九万里风鹏正举。\n风休住，蓬舟吹取三山去。' },
+  { title:'菩萨蛮·风柔日薄春犹早', author:'李清照', dynasty:'宋', content:'风柔日薄春犹早，夹衫乍著心情好。\n睡起觉微寒，梅花鬓上残。\n故乡何处是，忘了除非醉。\n沉水卧时烧，香消酒未消。' },
+  { title:'永遇乐·落日熔金', author:'李清照', dynasty:'宋', content:'落日熔金，暮云合璧，人在何处。\n染柳烟浓，吹梅笛怨，春意知几许。\n元宵佳节，融和天气，次第岂无风雨。\n来相召、香车宝马，谢他酒朋诗侣。\n中州盛日，闺门多暇，记得偏重三五。\n铺翠冠儿，捻金雪柳，簇带争济楚。\n如今憔悴，风鬟霜鬓，怕见夜间出去。\n不如向、帘儿底下，听人笑语。' },
+  { title:'清平乐·年年雪里', author:'李清照', dynasty:'宋', content:'年年雪里，常插梅花醉。\n挼尽梅花无好意，赢得满衣清泪。\n今年海角天涯，萧萧两鬓生华。\n看取晚来风势，故应难看梅花。' },
+  { title:'贺新郎·别茂嘉十二弟', author:'辛弃疾', dynasty:'宋', content:'绿树听鹈鴂。\n更那堪、鹧鸪声住，杜鹃声切。\n啼到春归无寻处，苦恨芳菲都歇。\n算未抵、人间离别。\n马上琵琶关塞黑，更长门、翠辇辞金阙。\n看燕燕，送归妾。\n将军百战身名裂。\n向河梁、回头万里，故人长绝。\n易水萧萧西风冷，满座衣冠似雪。\n正壮士、悲歌未彻。\n啼鸟还知如许恨，料不啼清泪长啼血。\n谁共我，醉明月？' },
+  { title:'摸鱼儿', author:'辛弃疾', dynasty:'宋', content:'更能消、几番风雨，匆匆春又归去。\n惜春长怕花开早，何况落红无数。\n春且住，见说道、天涯芳草无归路。\n怨春不语。\n算只有殷勤，画檐蛛网，尽日惹飞絮。\n长门事，准拟佳期又误。\n蛾眉曾有人妒。\n千金纵买相如赋，脉脉此情谁诉？\n君莫舞，君不见、玉环飞燕皆尘土！\n闲愁最苦！\n休去倚危栏，斜阳正在，烟柳断肠处。' },
+  { title:'水龙吟·登建康赏心亭', author:'辛弃疾', dynasty:'宋', content:'楚天千里清秋，水随天去秋无际。\n遥岑远目，献愁供恨，玉簪螺髻。\n落日楼头，断鸿声里，江南游子。\n把吴钩看了，栏杆拍遍，无人会，登临意。\n休说鲈鱼堪脍，尽西风、季鹰归未？\n求田问舍，怕应羞见，刘郎才气。\n可惜流年，忧愁风雨，树犹如此！\n倩何人唤取，红巾翠袖，揾英雄泪！' },
+  { title:'鹧鸪天·代人赋', author:'辛弃疾', dynasty:'宋', content:'陌上柔桑破嫩芽，东邻蚕种已生些。\n平冈细草鸣黄犊，斜日寒林点暮鸦。\n山远近，路横斜，青旗沽酒有人家。\n城中桃李愁风雨，春在溪头荠菜花。' },
+  { title:'生查子·元夕', author:'欧阳修', dynasty:'宋', content:'去年元夜时，花市灯如昼。\n月上柳梢头，人约黄昏后。\n今年元夜时，月与灯依旧。\n不见去年人，泪湿春衫袖。' },
+  { title:'蝶恋花·谁道闲情抛弃久', author:'欧阳修', dynasty:'宋', content:'谁道闲情抛弃久？每到春来，惆怅还依旧。\n日日花前常病酒，不辞镜里朱颜瘦。\n河畔青芜堤上柳，为问新愁，何事年年有？\n独立小桥风满袖，平林新月人归后。' },
+  { title:'玉楼春', author:'欧阳修', dynasty:'宋', content:'尊前拟把归期说，未语春容先惨咽。\n人生自是有情痴，此恨不关风与月。\n离歌且莫翻新阕，一曲能教肠寸结。\n直须看尽洛城花，始共春风容易别。' },
+  { title:'踏莎行', author:'欧阳修', dynasty:'宋', content:'候馆梅残，溪桥柳细。\n草薰风暖摇征辔。\n离愁渐远渐无穷，迢迢不断如春水。\n寸寸柔肠，盈盈粉泪。\n楼高莫近危阑倚。\n平芜尽处是春山，行人更在春山外。' },
+  { title:'诉衷情', author:'陆游', dynasty:'宋', content:'当年万里觅封侯，匹马戍梁州。\n关河梦断何处？尘暗旧貂裘。\n胡未灭，鬓先秋，泪空流。\n此生谁料，心在天山，身老沧洲。' },
+  { title:'渔家傲', author:'陆游', dynasty:'宋', content:'东望山阴何处是？往来一万三千里。\n写得家书空满纸。\n流清泪，书回已是明年事。\n寄语红桥桥下水，扁舟何日寻兄弟？\n行遍天涯真老矣。\n愁无寐，鬓丝几缕茶烟里。' },
+  { title:'书愤', author:'陆游', dynasty:'宋', content:'早岁那知世事艰，中原北望气如山。\n楼船夜雪瓜洲渡，铁马秋风大散关。\n塞上长城空自许，镜中衰鬓已先斑。\n出师一表真名世，千载谁堪伯仲间！' },
+  { title:'临安春雨初霁', author:'陆游', dynasty:'宋', content:'世味年来薄似纱，谁令骑马客京华。\n小楼一夜听春雨，深巷明朝卖杏花。\n矮纸斜行闲作草，晴窗细乳戏分茶。\n素衣莫起风尘叹，犹及清明可到家。' },
+  { title:'秋夜将晓出篱门迎凉有感', author:'陆游', dynasty:'宋', content:'三万里河东入海，五千仞岳上摩天。\n遗民泪尽胡尘里，南望王师又一年。' },
+  { title:'苏幕遮·怀旧', author:'范仲淹', dynasty:'宋', content:'碧云天，黄叶地。\n秋色连波，波上寒烟翠。\n山映斜阳天接水。\n芳草无情，更在斜阳外。\n黯乡魂，追旅思。\n夜夜除非，好梦留人睡。\n明月楼高休独倚。\n酒入愁肠，化作相思泪。' },
+  { title:'御街行', author:'范仲淹', dynasty:'宋', content:'纷纷坠叶飘香砌。\n夜寂静，寒声碎。\n真珠帘卷玉楼空，天淡银河垂地。\n年年今夜，月华如练，长是人千里。\n愁肠已断无由醉，酒未到，先成泪。\n残灯明灭枕头欹，谙尽孤眠滋味。\n都来此事，眉间心上，无计相回避。' },
+  { title:'桂枝香·金陵怀古', author:'王安石', dynasty:'宋', content:'登临送目。\n正故国晚秋，天气初肃。\n千里澄江似练，翠峰如簇。\n归帆去棹残阳里，背西风、酒旗斜矗。\n彩舟云淡，星河鹭起，画图难足。\n念往昔、繁华竞逐。\n叹门外楼头，悲恨相续。\n千古凭高对此，谩嗟荣辱。\n六朝旧事随流水，但寒烟、衰草凝绿。\n至今商女，时时犹唱，后庭遗曲。' },
+  { title:'千秋岁', author:'张先', dynasty:'宋', content:'数声鶗鴂，又报芳菲歇。\n惜春更把残红折。\n雨轻风色暴，梅子青时节。\n永丰柳，无人尽日花飞雪。\n莫把幺弦拨，怨极弦能说。\n天不老，情难绝。\n心似双丝网，中有千千结。\n夜过也，东窗未白凝残月。' },
+  { title:'天仙子', author:'张先', dynasty:'宋', content:'水调数声持酒听，午醉醒来愁未醒。\n送春春去几时回？\n临晚镜，伤流景，往事后期空记省。\n沙上并禽池上暝，云破月来花弄影。\n重重帘幕密遮灯，风不定，人初静，明日落红应满径。' },
+  { title:'望海潮', author:'柳永', dynasty:'宋', content:'东南形胜，三吴都会，钱塘自古繁华。\n烟柳画桥，风帘翠幕，参差十万人家。\n云树绕堤沙，怒涛卷霜雪，天堑无涯。\n市列珠玑，户盈罗绮，竞豪奢。\n重湖叠巘清嘉。\n有三秋桂子，十里荷花。\n羌管弄晴，菱歌泛夜，嬉嬉钓叟莲娃。\n千骑拥高牙，乘醉听箫鼓，吟赏烟霞。\n异日图将好景，归去凤池夸。' },
+  { title:'蝶恋花·伫倚危楼风细细', author:'柳永', dynasty:'宋', content:'伫倚危楼风细细，望极春愁，黯黯生天际。\n草色烟光残照里，无言谁会凭阑意。\n拟把疏狂图一醉，对酒当歌，强乐还无味。\n衣带渐宽终不悔，为伊消得人憔悴。' },
+  { title:'八声甘州', author:'柳永', dynasty:'宋', content:'对潇潇暮雨洒江天，一番洗清秋。\n渐霜风凄紧，关河冷落，残照当楼。\n是处红衰翠减，苒苒物华休。\n惟有长江水，无语东流。\n不忍登高临远，望故乡渺邈，归思难收。\n叹年来踪迹，何事苦淹留？\n想佳人、妆楼颙望，误几回、天际识归舟。\n争知我，倚栏杆处，正恁凝愁！' },
+  { title:'蝶恋花·槛菊愁烟兰泣露', author:'晏殊', dynasty:'宋', content:'槛菊愁烟兰泣露，罗幕轻寒，燕子双飞去。\n明月不谙离恨苦，斜光到晓穿朱户。\n昨夜西风凋碧树，独上高楼，望尽天涯路。\n欲寄彩笺兼尺素，山长水阔知何处？' },
+  { title:'踏莎行·祖席离歌', author:'晏殊', dynasty:'宋', content:'祖席离歌，长亭别宴。\n香尘已隔犹回面。\n居人匹马映林嘶，行人去棹依波转。\n画阁魂消，高楼目断。\n斜阳只送平波远。\n无穷无尽是离愁，天涯地角寻思遍。' },
+  { title:'清平乐·红笺小字', author:'晏殊', dynasty:'宋', content:'红笺小字，说尽平生意。\n鸿雁在云鱼在水，惆怅此情难寄。\n斜阳独倚西楼，遥山恰对帘钩。\n人面不知何处，绿波依旧东流。' },
+  { title:'踏莎行·郴州旅舍', author:'秦观', dynasty:'宋', content:'雾失楼台，月迷津渡。\n桃源望断无寻处。\n可堪孤馆闭春寒，杜鹃声里斜阳暮。\n驿寄梅花，鱼传尺素。\n砌成此恨无重数。\n郴江幸自绕郴山，为谁流下潇湘去。' },
+  { title:'浣溪沙·漠漠轻寒上小楼', author:'秦观', dynasty:'宋', content:'漠漠轻寒上小楼，晓阴无赖似穷秋。\n淡烟流水画屏幽。\n自在飞花轻似梦，无边丝雨细如愁。\n宝帘闲挂小银钩。' },
+  { title:'满庭芳', author:'秦观', dynasty:'宋', content:'山抹微云，天连衰草，画角声断谯门。\n暂停征棹，聊共引离尊。\n多少蓬莱旧事，空回首、烟霭纷纷。\n斜阳外，寒鸦万点，流水绕孤村。\n销魂。\n当此际，香囊暗解，罗带轻分。\n谩赢得、青楼薄幸名存。\n此去何时见也，襟袖上、空惹啼痕。\n伤情处，高城望断，灯火已黄昏。' },
+  { title:'鹧鸪天·彩袖殷勤捧玉钟', author:'晏几道', dynasty:'宋', content:'彩袖殷勤捧玉钟，当年拚却醉颜红。\n舞低杨柳楼心月，歌尽桃花扇底风。\n从别后，忆相逢，几回魂梦与君同。\n今宵剩把银釭照，犹恐相逢是梦中。' },
+  { title:'阮郎归', author:'晏几道', dynasty:'宋', content:'天边金掌露成霜，云随雁字长。\n绿杯红袖趁重阳，人情似故乡。\n兰佩紫，菊簪黄，殷勤理旧狂。\n欲将沉醉换悲凉，清歌莫断肠。' },
+  { title:'兰陵王·柳', author:'周邦彦', dynasty:'宋', content:'柳阴直，烟里丝丝弄碧。\n隋堤上、曾见几番，拂水飘绵送行色。\n登临望故国，谁识京华倦客？\n长亭路，年去岁来，应折柔条过千尺。\n闲寻旧踪迹，又酒趁哀弦，灯照离席。\n梨花榆火催寒食。\n愁一箭风快，半篙波暖，回头迢递便数驿，望人在天北。\n凄恻，恨堆积！\n渐别浦萦回，津堠岑寂，斜阳冉冉春无极。\n念月榭携手，露桥闻笛。\n沉思前事，似梦里，泪暗滴。' },
+  { title:'西河·金陵怀古', author:'周邦彦', dynasty:'宋', content:'佳丽地，南朝盛事谁记。\n山围故国绕清江，髻鬟对起。\n怒涛寂寞打孤城，风樯遥度天际。\n断崖树，犹倒倚。\n莫愁艇子曾系。\n空余旧迹郁苍苍，雾沉半垒。\n夜深月过女墙来，伤心东望淮水。\n酒旗戏鼓甚处市。\n想依稀、王谢邻里。\n燕子不知何世。\n入寻常、巷陌人家，相对如说兴亡，斜阳里。' },
+  { title:'六丑·落花', author:'周邦彦', dynasty:'宋', content:'正单衣试酒，怅客里、光阴虚掷。\n愿春暂留，春归如过翼，一去无迹。\n为问花何在，夜来风雨，葬楚宫倾国。\n钗钿堕处遗香泽。\n乱点桃蹊，轻翻柳陌。\n多情为谁追惜。\n但蜂媒蝶使，时叩窗槅。\n东园岑寂，渐蒙笼暗碧。\n静绕珍丛底，成叹息。\n长条故惹行客。\n似牵衣待话，别情无极。\n残英小、强簪巾帻。\n终不似一朵，钗头颤袅，向人欹侧。\n漂流处、莫趁潮汐。\n恐断红、尚有相思字，何由见得。' },
+  { title:'唐多令', author:'刘过', dynasty:'宋', content:'芦叶满汀洲，寒沙带浅流。\n二十年、重过南楼。\n柳下系船犹未稳，能几日，又中秋。\n黄鹤断矶头，故人今在否？\n旧江山、浑是新愁。\n欲买桂花同载酒，终不似，少年游。' },
+  { title:'贺新郎·九日', author:'刘克庄', dynasty:'宋', content:'湛湛长空黑。\n更那堪、斜风细雨，乱愁如织。\n老眼平生空四海，赖有高楼百尺。\n看浩荡、千崖秋色。\n白发书生神州泪，尽凄凉、不向牛山滴。\n追往事，去无迹。\n少年自负凌云笔。\n到而今、春华落尽，满怀萧瑟。\n常恨世人新意少，爱说南朝狂客。\n把破帽、年年拈出。\n若对黄花孤负酒，怕黄花、也笑人岑寂。\n鸿北去，日西匿。' },
+
+  // ======== 扩编 — 宋词续补 + 元明清 ========
+  { title:'贺新郎·送胡邦衡谪新州', author:'张元干', dynasty:'宋', content:'梦绕神州路。\n怅秋风、连营画角，故宫离黍。\n底事昆仑倾砥柱，九地黄流乱注。\n聚万落、千村狐兔。\n天意从来高难问，况人情、老易悲如许。\n更南浦，送君去。\n凉生岸柳催残暑。\n耿斜河、疏星淡月，断云微度。\n万里江山知何处？回首对床夜语。\n雁不到、书成谁与？\n目尽青天怀今古，肯儿曹、恩怨相尔汝。\n举大白，听金缕。' },
+  { title:'忆王孙·春词', author:'李重元', dynasty:'宋', content:'萋萋芳草忆王孙。\n柳外楼高空断魂。\n杜宇声声不忍闻。\n欲黄昏，雨打梨花深闭门。' },
+  { title:'眼儿媚', author:'朱淑真', dynasty:'宋', content:'迟迟春日弄轻柔，花径暗香流。\n清明过了，不堪回首，云锁朱楼。\n午窗睡起莺声巧，何处唤春愁？\n绿杨影里，海棠亭畔，红杏梢头。' },
+  { title:'谒金门·春半', author:'朱淑真', dynasty:'宋', content:'春已半，触目此情无限。\n十二阑干闲倚遍，愁来天不管。\n好是风和日暖，输与莺莺燕燕。\n满院落花帘不卷，断肠芳草远。' },
+  { title:'醉垂鞭', author:'张先', dynasty:'宋', content:'双蝶绣罗裙，东池宴，初相见。\n朱粉不深匀，闲花淡淡春。\n细看诸处好，人人道，柳腰身。\n昨日乱山昏，来时衣上云。' },
+  { title:'曲玉管', author:'柳永', dynasty:'宋', content:'陇首云飞，江边日晚，烟波满目凭阑久。\n立望关河萧索，千里清秋，忍凝眸。\n杳杳神京，盈盈仙子，别来锦字终难偶。\n断雁无凭，冉冉飞下汀洲，思悠悠。\n暗想当初，有多少、幽欢佳会，岂知聚散难期，翻成雨恨云愁。\n阻追游。\n每登山临水，惹起平生心事，一场消黯，永日无言，却下层楼。' },
+  { title:'采莲令', author:'柳永', dynasty:'宋', content:'月华收，云淡霜天曙。\n西征客、此时情苦。\n翠娥执手送临歧，轧轧开朱户。\n千娇面、盈盈伫立，无言有泪，断肠争忍回顾？\n一叶兰舟，便恁急桨凌波去。\n贪行色、岂知离绪。\n万般方寸，但饮恨、脉脉同谁语。\n更回首、重城不见，寒江天外，隐隐两三烟树。' },
+  { title:'水龙吟·次韵章质夫杨花词', author:'苏轼', dynasty:'宋', content:'似花还似非花，也无人惜从教坠。\n抛家傍路，思量却是，无情有思。\n萦损柔肠，困酣娇眼，欲开还闭。\n梦随风万里，寻郎去处，又还被、莺呼起。\n不恨此花飞尽，恨西园、落红难缀。\n晓来雨过，遗踪何在？一池萍碎。\n春色三分，二分尘土，一分流水。\n细看来，不是杨花，点点是离人泪。' },
+  { title:'满庭芳·蜗角虚名', author:'苏轼', dynasty:'宋', content:'蜗角虚名，蝇头微利，算来著甚干忙。\n事皆前定，谁弱又谁强。\n且趁闲身未老，尽放我、些子疏狂。\n百年里，浑教是醉，三万六千场。\n思量。能几许，忧愁风雨，一半相妨。\n又何须，抵死说短论长。\n幸对清风皓月，苔茵展、云幕高张。\n江南好，千钟美酒，一曲满庭芳。' },
+  { title:'琵琶仙', author:'姜夔', dynasty:'宋', content:'双桨来时，有人似、旧曲桃根桃叶。\n歌扇轻约飞花，蛾眉正奇绝。\n春渐远、汀洲自绿，更添了、几声啼鴂。\n十里扬州，三生杜牧，前事休说。\n又还是、宫烛分烟，奈愁里、匆匆换时节。\n都把一襟芳思，与空阶榆荚。\n千万缕、藏鸦细柳，为玉尊、起舞回雪。\n想见西出阳关，故人初别。' },
+  { title:'点绛唇·丁未冬过吴松作', author:'姜夔', dynasty:'宋', content:'燕雁无心，太湖西畔随云去。\n数峰清苦，商略黄昏雨。\n第四桥边，拟共天随住。\n今何许？凭阑怀古，残柳参差舞。' },
+  { title:'暗香', author:'姜夔', dynasty:'宋', content:'旧时月色，算几番照我，梅边吹笛？\n唤起玉人，不管清寒与攀摘。\n何逊而今渐老，都忘却、春风词笔。\n但怪得、竹外疏花，香冷入瑶席。\n江国，正寂寂。\n叹寄与路遥，夜雪初积。\n翠尊易泣，红萼无言耿相忆。\n长记曾携手处，千树压、西湖寒碧。\n又片片、吹尽也，几时见得？' },
+  { title:'疏影', author:'姜夔', dynasty:'宋', content:'苔枝缀玉，有翠禽小小，枝上同宿。\n客里相逢，篱角黄昏，无言自倚修竹。\n昭君不惯胡沙远，但暗忆、江南江北。\n想佩环、月夜归来，化作此花幽独。\n犹记深宫旧事，那人正睡里，飞近蛾绿。\n莫似春风，不管盈盈，早与安排金屋。\n还教一片随波去，又却怨、玉龙哀曲。\n等恁时、重觅幽香，已入小窗横幅。' },
+  { title:'风入松', author:'吴文英', dynasty:'宋', content:'听风听雨过清明，愁草瘗花铭。\n楼前绿暗分携路，一丝柳、一寸柔情。\n料峭春寒中酒，交加晓梦啼莺。\n西园日日扫林亭，依旧赏新晴。\n黄蜂频扑秋千索，有当时、纤手香凝。\n惆怅双鸳不到，幽阶一夜苔生。' },
+  { title:'唐多令·惜别', author:'吴文英', dynasty:'宋', content:'何处合成愁？离人心上秋。\n纵芭蕉、不雨也飕飕。\n都道晚凉天气好，有明月、怕登楼。\n年事梦中休，花空烟水流。\n燕辞归、客尚淹留。\n垂柳不萦裙带住，漫长是、系行舟。' },
+  { title:'醉花阴', author:'李清照', dynasty:'宋', content:'薄雾浓云愁永昼，瑞脑销金兽。\n佳节又重阳，玉枕纱橱，半夜凉初透。\n东篱把酒黄昏后，有暗香盈袖。\n莫道不销魂，帘卷西风，人比黄花瘦。' },
+  { title:'声声慢', author:'李清照', dynasty:'宋', content:'寻寻觅觅，冷冷清清，凄凄惨惨戚戚。\n乍暖还寒时候，最难将息。\n三杯两盏淡酒，怎敌他、晚来风急？\n雁过也，正伤心，却是旧时相识。\n满地黄花堆积，憔悴损，如今有谁堪摘？\n守着窗儿，独自怎生得黑？\n梧桐更兼细雨，到黄昏、点点滴滴。\n这次第，怎一个愁字了得！' },
+  { title:'念奴娇·过洞庭', author:'张孝祥', dynasty:'宋', content:'洞庭青草，近中秋、更无一点风色。\n玉界琼田三万顷，著我扁舟一叶。\n素月分辉，明河共影，表里俱澄澈。\n悠然心会，妙处难与君说。\n应念岭海经年，孤光自照，肝胆皆冰雪。\n短发萧骚襟袖冷，稳泛沧溟空阔。\n尽挹西江，细斟北斗，万象为宾客。\n扣舷独啸，不知今夕何夕。' },
+  { title:'六州歌头', author:'张孝祥', dynasty:'宋', content:'长淮望断，关塞莽然平。\n征尘暗，霜风劲，悄边声。黯销凝。\n追想当年事，殆天数，非人力；洙泗上，弦歌地，亦膻腥。\n隔水毡乡，落日牛羊下，区脱纵横。\n看名王宵猎，骑火一川明。笳鼓悲鸣，遣人惊。\n念腰间箭，匣中剑，空埃蠹，竟何成！\n时易失，心徒壮，岁将零。\n渺神京。\n干羽方怀远，静烽燧，且休兵。\n冠盖使，纷驰骛，若为情！\n闻道中原遗老，常南望、翠葆霓旌。\n使行人到此，忠愤气填膺，有泪如倾。' },
+  { title:'减字木兰花·春月', author:'苏轼', dynasty:'宋', content:'春庭月午，摇荡香醪光欲舞。\n步转回廊，半落梅花婉娩香。\n轻烟薄雾，总是少年行乐处。\n不似秋光，只与离人照断肠。' },
+  { title:'如梦令·春景', author:'秦观', dynasty:'宋', content:'莺嘴啄花红溜，燕尾点波绿皱。\n指冷玉笙寒，吹彻小梅春透。\n依旧，依旧，人与绿杨俱瘦。' },
+  { title:'清平乐', author:'黄庭坚', dynasty:'宋', content:'春归何处？寂寞无行路。\n若有人知春去处，唤取归来同住。\n春无踪迹谁知？除非问取黄鹂。\n百啭无人能解，因风飞过蔷薇。' },
+  { title:'水调歌头·游览', author:'黄庭坚', dynasty:'宋', content:'瑶草一何碧，春入武陵溪。\n溪上桃花无数，枝上有黄鹂。\n我欲穿花寻路，直入白云深处，浩气展虹霓。\n只恐花深里，红露湿人衣。\n坐玉石，倚玉枕，拂金徽。\n谪仙何处？无人伴我白螺杯。\n我为灵芝仙草，不为朱唇丹脸，长啸亦何为？\n醉舞下山去，明月逐人归。' },
+  { title:'蝶恋花·春暮', author:'李冠', dynasty:'宋', content:'遥夜亭皋闲信步。\n才过清明，渐觉伤春暮。\n数点雨声风约住，朦胧淡月云来去。\n桃杏依稀香暗度。\n谁在秋千，笑里轻轻语？\n一寸相思千万绪，人间没个安排处。' },
+  { title:'青门引', author:'张先', dynasty:'宋', content:'乍暖还轻冷，风雨晚来方定。\n庭轩寂寞近清明，残花中酒，又是去年病。\n楼头画角风吹醒，入夜重门静。\n那堪更被明月，隔墙送过秋千影。' },
+  { title:'洞仙歌·泗州中秋作', author:'晁补之', dynasty:'宋', content:'青烟幂处，碧海飞金镜。\n永夜闲阶卧桂影。\n露凉时、零乱多少寒螀，神京远，惟有蓝桥路近。\n水晶帘不下，云母屏开，冷浸佳人淡脂粉。\n待都将许多明，付与金尊，投晓共、流霞倾尽。\n更携取、胡床上南楼，看玉做人间，素秋千顷。' },
+  { title:'临江仙·梦后楼台高锁', author:'晏几道', dynasty:'宋', content:'梦后楼台高锁，酒醒帘幕低垂。\n去年春恨却来时。\n落花人独立，微雨燕双飞。\n记得小蘋初见，两重心字罗衣。\n琵琶弦上说相思。\n当时明月在，曾照彩云归。' },
+  { title:'生查子·关山魂梦长', author:'晏几道', dynasty:'宋', content:'关山魂梦长，鱼雁音尘少。\n两鬓可怜青，只为相思老。\n归梦碧纱窗，说与人人道。\n真个别离难，不似相逢好。' },
+  { title:'望江南', author:'温庭筠', dynasty:'唐', content:'梳洗罢，独倚望江楼。\n过尽千帆皆不是，斜晖脉脉水悠悠。\n肠断白蘋洲。' },
+  { title:'梦江南', author:'温庭筠', dynasty:'唐', content:'千万恨，恨极在天涯。\n山月不知心里事，水风空落眼前花，摇曳碧云斜。' },
+  { title:'更漏子', author:'温庭筠', dynasty:'唐', content:'玉炉香，红蜡泪，偏照画堂秋思。\n眉翠薄，鬓云残，夜长衾枕寒。\n梧桐树，三更雨，不道离情正苦。\n一叶叶，一声声，空阶滴到明。' },
+  { title:'摊破浣溪沙', author:'李璟', dynasty:'南唐', content:'菡萏香销翠叶残，西风愁起绿波间。\n还与韶光共憔悴，不堪看。\n细雨梦回鸡塞远，小楼吹彻玉笙寒。\n多少泪珠何限恨，倚阑干。' },
+  { title:'菩萨蛮', author:'韦庄', dynasty:'唐', content:'人人尽说江南好，游人只合江南老。\n春水碧于天，画船听雨眠。\n垆边人似月，皓腕凝霜雪。\n未老莫还乡，还乡须断肠。' },
+  { title:'思帝乡', author:'韦庄', dynasty:'唐', content:'春日游，杏花吹满头。\n陌上谁家年少，足风流？\n妾拟将身嫁与，一生休。\n纵被无情弃，不能羞。' },
+  { title:'女冠子', author:'韦庄', dynasty:'唐', content:'昨夜夜半，枕上分明梦见。\n语多时。依旧桃花面，频低柳叶眉。\n半羞还半喜，欲去又依依。\n觉来知是梦，不胜悲。' },
+  { title:'山坡羊·骊山怀古', author:'张养浩', dynasty:'元', content:'骊山四顾，阿房一炬，当时奢侈今何处？\n只见草萧疏，水萦纡。\n至今遗恨迷烟树。\n列国周齐秦汉楚。\n赢，都变做了土；输，都变做了土。' },
+  { title:'卖花声·怀古', author:'张可久', dynasty:'元', content:'美人自刎乌江岸，战火曾烧赤壁山，将军空老玉门关。\n伤心秦汉，生民涂炭，读书人一声长叹。' },
+  { title:'水仙子·夜雨', author:'徐再思', dynasty:'元', content:'一声梧叶一声秋，一点芭蕉一点愁，三更归梦三更后。\n落灯花，棋未收，叹新丰逆旅淹留。\n枕上十年事，江南二老忧，都到心头。' },
+  { title:'蟾宫曲·叹世', author:'马致远', dynasty:'元', content:'咸阳百二山河，两字功名，几阵干戈。\n项废东吴，刘兴西蜀，梦说南柯。\n韩信功兀的般证果，蒯通言那里是风魔？\n成也萧何，败也萧何。醉了由他。' },
+  { title:'四块玉·闲适', author:'关汉卿', dynasty:'元', content:'适意行，安心坐。渴时饮饥时餐醉时歌，困来时就向莎茵卧。\n日月长，天地阔，闲快活。' },
+  { title:'大德歌·春', author:'关汉卿', dynasty:'元', content:'子规啼，不如归，道是春归人未归。\n几日添憔悴，虚飘飘柳絮飞。\n一春鱼雁无消息，则见双燕斗衔泥。' },
+  { title:'水仙子·咏江南', author:'张养浩', dynasty:'元', content:'一江烟水照晴岚，两岸人家接画檐，芰荷丛一段秋光淡。\n看沙鸥舞再三，卷香风十里珠帘。\n画船儿天边至，酒旗儿风外飐。\n爱杀江南。' },
+  { title:'朝天子·咏喇叭', author:'王磐', dynasty:'明', content:'喇叭，唢呐，曲儿小腔儿大。\n官船来往乱如麻，全仗你抬声价。\n军听了军愁，民听了民怕。\n那里去辨甚么真共假？\n眼见的吹翻了这家，吹伤了那家，只吹的水尽鹅飞罢。' },
+  { title:'一剪梅·雨打梨花深闭门', author:'唐寅', dynasty:'明', content:'雨打梨花深闭门，忘了青春，误了青春。\n赏心乐事共谁论？花下销魂，月下销魂。\n愁聚眉峰尽日颦，千点啼痕，万点啼痕。\n晓看天色暮看云，行也思君，坐也思君。' },
+  { title:'言志', author:'唐寅', dynasty:'明', content:'不炼金丹不坐禅，不为商贾不耕田。\n闲来写就青山卖，不使人间造孽钱。' },
+  { title:'绝句', author:'唐寅', dynasty:'明', content:'不炼金丹不坐禅，不为商贾不耕田。\n闲来写就青山卖，不使人间造孽钱。' },
+  { title:'长相思', author:'俞彦', dynasty:'明', content:'折花枝，恨花枝，准拟花开人共卮，开时人去时。\n怕相思，已相思，轮到相思没处辞，眉间露一丝。' },
+  { title:'蝶恋花', author:'纳兰性德', dynasty:'清', content:'辛苦最怜天上月，一昔如环，昔昔都成玦。\n若似月轮终皎洁，不辞冰雪为卿热。\n无那尘缘容易绝，燕子依然，软踏帘钩说。\n唱罢秋坟愁未歇，春丛认取双栖蝶。' },
+  { title:'浣溪沙·谁念西风独自凉', author:'纳兰性德', dynasty:'清', content:'谁念西风独自凉，萧萧黄叶闭疏窗，沉思往事立残阳。\n被酒莫惊春睡重，赌书消得泼茶香，当时只道是寻常。' },
+  { title:'金缕曲·赠梁汾', author:'纳兰性德', dynasty:'清', content:'德也狂生耳。偶然间、缁尘京国，乌衣门第。\n有酒惟浇赵州土，谁会成生此意。\n不信道、遂成知己。\n青眼高歌俱未老，向尊前、拭尽英雄泪。\n君不见，月如水。\n共君此夜须沉醉。\n且由他、娥眉谣诼，古今同忌。\n身世悠悠何足问，冷笑置之而已。\n寻思起、从头翻悔。\n一日心期千劫在，后身缘、恐结他生里。\n然诺重，君须记。' },
+  { title:'葬花吟', author:'曹雪芹', dynasty:'清', content:'花谢花飞花满天，红消香断有谁怜？\n游丝软系飘春榭，落絮轻沾扑绣帘。\n闺中女儿惜春暮，愁绪满怀无释处。\n手把花锄出绣帘，忍踏落花来复去。\n柳丝榆荚自芳菲，不管桃飘与李飞。\n桃李明年能再发，明年闺中知有谁？\n三月香巢已垒成，梁间燕子太无情！\n明年花发虽可啄，却不道人去梁空巢也倾。\n一年三百六十日，风刀霜剑严相逼。\n明媚鲜妍能几时？一朝飘泊难寻觅。\n花开易见落难寻，阶前闷杀葬花人。\n独倚花锄泪暗洒，洒上空枝见血痕。\n杜鹃无语正黄昏，荷锄归去掩重门。\n青灯照壁人初睡，冷雨敲窗被未温。\n怪奴底事倍伤神？半为怜春半恼春。\n怜春忽至恼忽去，至又无言去不闻。\n昨宵庭外悲歌发，知是花魂与鸟魂？\n花魂鸟魂总难留，鸟自无言花自羞。\n愿奴胁下生双翼，随花飞到天尽头。\n天尽头，何处有香丘？\n未若锦囊收艳骨，一抔净土掩风流。\n质本洁来还洁去，强于污淖陷渠沟。\n尔今死去侬收葬，未卜侬身何日丧？\n侬今葬花人笑痴，他年葬侬知是谁？\n试看春残花渐落，便是红颜老死时。\n一朝春尽红颜老，花落人亡两不知！' },
+  { title:'红豆词', author:'曹雪芹', dynasty:'清', content:'滴不尽相思血泪抛红豆，开不完春柳春花满画楼。\n睡不稳纱窗风雨黄昏后，忘不了新愁与旧愁。\n咽不下玉粒金莼噎满喉，照不见菱花镜里形容瘦。\n展不开的眉头，捱不明的更漏。\n恰便似遮不住的青山隐隐，流不断的绿水悠悠。' },
+  { title:'论诗·其二', author:'赵翼', dynasty:'清', content:'李杜诗篇万口传，至今已觉不新鲜。\n江山代有才人出，各领风骚数百年。' },
+  { title:'苔', author:'袁枚', dynasty:'清', content:'白日不到处，青春恰自来。\n苔花如米小，也学牡丹开。' },
+  { title:'遣兴', author:'袁枚', dynasty:'清', content:'爱好由来下笔难，一诗千改始心安。\n阿婆还似初笄女，头未梳成不许看。' },
+  { title:'己亥杂诗·其二百二十', author:'龚自珍', dynasty:'清', content:'九州生气恃风雷，万马齐喑究可哀。\n我劝天公重抖擞，不拘一格降人才。' },
+  { title:'如梦令·昨夜雨疏风骤', author:'李清照', dynasty:'宋', content:'昨夜雨疏风骤，浓睡不消残酒。\n试问卷帘人，却道海棠依旧。\n知否，知否？应是绿肥红瘦。' },
+  { title:'一剪梅', author:'李清照', dynasty:'宋', content:'红藕香残玉簟秋。轻解罗裳，独上兰舟。\n云中谁寄锦书来，雁字回时，月满西楼。\n花自飘零水自流。一种相思，两处闲愁。\n此情无计可消除，才下眉头，却上心头。' },
+
+  // ======== 扩编 — 唐诗续 + 诗经 + 汉魏 + 其他 ========
+  { title:'古意呈补阙乔知之', author:'沈佺期', dynasty:'唐', content:'卢家少妇郁金堂，海燕双栖玳瑁梁。\n九月寒砧催木叶，十年征戍忆辽阳。\n白狼河北音书断，丹凤城南秋夜长。\n谁为含愁独不见，更教明月照流黄。' },
+  { title:'送魏万之京', author:'李颀', dynasty:'唐', content:'朝闻游子唱离歌，昨夜微霜初渡河。\n鸿雁不堪愁里听，云山况是客中过。\n关城树色催寒近，御苑砧声向晚多。\n莫见长安行乐处，空令岁月易蹉跎。' },
+  { title:'九日登望仙台呈刘明府容', author:'崔曙', dynasty:'唐', content:'汉文皇帝有高台，此日登临曙色开。\n三晋云山皆北向，二陵风雨自东来。\n关门令尹谁能识，河上仙翁去不回。\n且欲近寻彭泽宰，陶然共醉菊花杯。' },
+  { title:'送李少府贬峡中王少府贬长沙', author:'高适', dynasty:'唐', content:'嗟君此别意何如，驻马衔杯问谪居。\n巫峡啼猿数行泪，衡阳归雁几封书。\n青枫江上秋帆远，白帝城边古木疏。\n圣代即今多雨露，暂时分手莫踌躇。' },
+  { title:'奉和中书舍人贾至早朝大明宫', author:'岑参', dynasty:'唐', content:'鸡鸣紫陌曙光寒，莺啭皇州春色阑。\n金阙晓钟开万户，玉阶仙仗拥千官。\n花迎剑佩星初落，柳拂旌旗露未干。\n独有凤凰池上客，阳春一曲和皆难。' },
+  { title:'和贾舍人早朝', author:'王维', dynasty:'唐', content:'绛帻鸡人送晓筹，尚衣方进翠云裘。\n九天阊阖开宫殿，万国衣冠拜冕旒。\n日色才临仙掌动，香烟欲傍衮龙浮。\n朝罢须裁五色诏，佩声归向凤池头。' },
+  { title:'积雨辋川庄作', author:'王维', dynasty:'唐', content:'积雨空林烟火迟，蒸藜炊黍饷东菑。\n漠漠水田飞白鹭，阴阴夏木啭黄鹂。\n山中习静观朝槿，松下清斋折露葵。\n野老与人争席罢，海鸥何事更相疑。' },
+  { title:'西塞山怀古', author:'刘禹锡', dynasty:'唐', content:'王濬楼船下益州，金陵王气黯然收。\n千寻铁锁沉江底，一片降幡出石头。\n人世几回伤往事，山形依旧枕寒流。\n今逢四海为家日，故垒萧萧芦荻秋。' },
+  { title:'自河南经乱关内阻饥兄弟离散', author:'白居易', dynasty:'唐', content:'时难年荒世业空，弟兄羁旅各西东。\n田园寥落干戈后，骨肉流离道路中。\n吊影分为千里雁，辞根散作九秋蓬。\n共看明月应垂泪，一夜乡心五处同。' },
+  { title:'锦瑟', author:'李商隐', dynasty:'唐', content:'锦瑟无端五十弦，一弦一柱思华年。\n庄生晓梦迷蝴蝶，望帝春心托杜鹃。\n沧海月明珠有泪，蓝田日暖玉生烟。\n此情可待成追忆？只是当时已惘然。' },
+  { title:'无题·昨夜星辰昨夜风', author:'李商隐', dynasty:'唐', content:'昨夜星辰昨夜风，画楼西畔桂堂东。\n身无彩凤双飞翼，心有灵犀一点通。\n隔座送钩春酒暖，分曹射覆蜡灯红。\n嗟余听鼓应官去，走马兰台类转蓬。' },
+  { title:'无题·来是空言去绝踪', author:'李商隐', dynasty:'唐', content:'来是空言去绝踪，月斜楼上五更钟。\n梦为远别啼难唤，书被催成墨未浓。\n蜡照半笼金翡翠，麝熏微度绣芙蓉。\n刘郎已恨蓬山远，更隔蓬山一万重。' },
+  { title:'无题·飒飒东风细雨来', author:'李商隐', dynasty:'唐', content:'飒飒东风细雨来，芙蓉塘外有轻雷。\n金蟾啮锁烧香入，玉虎牵丝汲井回。\n贾氏窥帘韩掾少，宓妃留枕魏王才。\n春心莫共花争发，一寸相思一寸灰。' },
+  { title:'筹笔驿', author:'李商隐', dynasty:'唐', content:'猿鸟犹疑畏简书，风云常为护储胥。\n徒令上将挥神笔，终见降王走传车。\n管乐有才原不忝，关张无命欲何如。\n他年锦里经祠庙，梁父吟成恨有余。' },
+  { title:'春雨', author:'李商隐', dynasty:'唐', content:'怅卧新春白袷衣，白门寥落意多违。\n红楼隔雨相望冷，珠箔飘灯独自归。\n远路应悲春晼晚，残霄犹得梦依稀。\n玉珰缄札何由达，万里云罗一雁飞。' },
+  { title:'利州南渡', author:'温庭筠', dynasty:'唐', content:'澹然空水对斜晖，曲岛苍茫接翠微。\n波上马嘶看棹去，柳边人歇待船归。\n数丛沙草群鸥散，万顷江田一鹭飞。\n谁解乘舟寻范蠡，五湖烟水独忘机。' },
+  { title:'贫女', author:'秦韬玉', dynasty:'唐', content:'蓬门未识绮罗香，拟托良媒益自伤。\n谁爱风流高格调，共怜时世俭梳妆。\n敢将十指夸针巧，不把双眉斗画长。\n苦恨年年压金线，为他人作嫁衣裳。' },
+  { title:'独不见', author:'沈佺期', dynasty:'唐', content:'卢家少妇郁金堂，海燕双栖玳瑁梁。\n九月寒砧催木叶，十年征戍忆辽阳。\n白狼河北音书断，丹凤城南秋夜长。\n谁为含愁独不见，更教明月照流黄。' },
+  { title:'鹿柴', author:'王维', dynasty:'唐', content:'空山不见人，但闻人语响。\n返景入深林，复照青苔上。' },
+  { title:'竹枝词·其二', author:'刘禹锡', dynasty:'唐', content:'楚水巴山江雨多，巴人能唱本乡歌。\n今朝北客思归去，回入纥那披绿罗。' },
+  { title:'征人怨', author:'柳中庸', dynasty:'唐', content:'岁岁金河复玉关，朝朝马策与刀环。\n三春白雪归青冢，万里黄河绕黑山。' },
+  { title:'宫词', author:'顾况', dynasty:'唐', content:'玉楼天半起笙歌，风送宫嫔笑语和。\n月殿影开闻夜漏，水晶帘卷近秋河。' },
+  { title:'桃花溪', author:'张旭', dynasty:'唐', content:'隐隐飞桥隔野烟，石矶西畔问渔船。\n桃花尽日随流水，洞在清溪何处边。' },
+  { title:'寄人', author:'张泌', dynasty:'唐', content:'别梦依依到谢家，小廊回合曲阑斜。\n多情只有春庭月，犹为离人照落花。' },
+  { title:'滁州西涧', author:'韦应物', dynasty:'唐', content:'独怜幽草涧边生，上有黄鹂深树鸣。\n春潮带雨晚来急，野渡无人舟自横。' },
+  { title:'寄李儋元锡', author:'韦应物', dynasty:'唐', content:'去年花里逢君别，今日花开已一年。\n世事茫茫难自料，春愁黯黯独成眠。\n身多疾病思田里，邑有流亡愧俸钱。\n闻道欲来相问讯，西楼望月几回圆。' },
+  { title:'淮上喜会梁川故人', author:'韦应物', dynasty:'唐', content:'江汉曾为客，相逢每醉还。\n浮云一别后，流水十年间。\n欢笑情如旧，萧疏鬓已斑。\n何因不归去？淮上有秋山。' },
+  { title:'赋得暮雨送李胄', author:'韦应物', dynasty:'唐', content:'楚江微雨里，建业暮钟时。\n漠漠帆来重，冥冥鸟去迟。\n海门深不见，浦树远含滋。\n相送情无限，沾襟比散丝。' },
+  { title:'寻陆鸿渐不遇', author:'皎然', dynasty:'唐', content:'移家虽带郭，野径入桑麻。\n近种篱边菊，秋来未著花。\n扣门无犬吠，欲去问西家。\n报道山中去，归时每日斜。' },
+  { title:'春山夜月', author:'于良史', dynasty:'唐', content:'春山多胜事，赏玩夜忘归。\n掬水月在手，弄花香满衣。\n兴来无远近，欲去惜芳菲。\n南望鸣钟处，楼台深翠微。' },
+  { title:'没蕃故人', author:'张籍', dynasty:'唐', content:'前年伐月支，城下没全师。\n蕃汉断消息，死生长别离。\n无人收废帐，归马识残旗。\n欲祭疑君在，天涯哭此时。' },
+  { title:'早秋', author:'许浑', dynasty:'唐', content:'遥夜泛清瑟，西风生翠萝。\n残萤栖玉露，早雁拂金河。\n高树晓还密，远山晴更多。\n淮南一叶下，自觉洞庭波。' },
+  { title:'蝉', author:'李商隐', dynasty:'唐', content:'本以高难饱，徒劳恨费声。\n五更疏欲断，一树碧无情。\n薄宦梗犹泛，故园芜已平。\n烦君最相警，我亦举家清。' },
+  { title:'风雨', author:'李商隐', dynasty:'唐', content:'凄凉宝剑篇，羁泊欲穷年。\n黄叶仍风雨，青楼自管弦。\n新知遭薄俗，旧好隔良缘。\n心断新丰酒，销愁斗几千。' },
+  { title:'落花', author:'李商隐', dynasty:'唐', content:'高阁客竟去，小园花乱飞。\n参差连曲陌，迢递送斜晖。\n肠断未忍扫，眼穿仍欲归。\n芳心向春尽，所得是沾衣。' },
+  { title:'凉思', author:'李商隐', dynasty:'唐', content:'客去波平槛，蝉休露满枝。\n永怀当此节，倚立自移时。\n北斗兼春远，南陵寓使迟。\n天涯占梦数，疑误有新知。' },
+  { title:'北青萝', author:'李商隐', dynasty:'唐', content:'残阳西入崦，茅屋访孤僧。\n落叶人何在，寒云路几层。\n独敲初夜磬，闲倚一枝藤。\n世界微尘里，吾宁爱与憎。' },
+  { title:'楚江怀古', author:'马戴', dynasty:'唐', content:'露气寒光集，微阳下楚丘。\n猿啼洞庭树，人在木兰舟。\n广泽生明月，苍山夹乱流。\n云中君不见，竟夕自悲秋。' },
+  { title:'除夜有怀', author:'崔涂', dynasty:'唐', content:'迢递三巴路，羁危万里身。\n残雪和雁断，新雪带潮春。\n那堪正飘泊，明日岁华新。' },
+  { title:'孤雁', author:'崔涂', dynasty:'唐', content:'几行归塞尽，念尔独何之。\n暮雨相呼失，寒塘欲下迟。\n渚云低暗度，关月冷相随。\n未必逢矰缴，孤飞自可疑。' },
+  { title:'书边事', author:'张乔', dynasty:'唐', content:'调角断清秋，征人倚戍楼。\n春风对青冢，白日落梁州。\n大漠无兵阻，穷边有客游。\n蕃情似此水，长愿向南流。' },
+  { title:'春宫怨', author:'杜荀鹤', dynasty:'唐', content:'早被婵娟误，欲妆临镜慵。\n承恩不在貌，教妾若为容。\n风暖鸟声碎，日高花影重。\n年年越溪女，相忆采芙蓉。' },
+  { title:'章台夜思', author:'韦庄', dynasty:'唐', content:'清瑟怨遥夜，绕弦风雨哀。\n孤灯闻楚角，残月下章台。\n芳草已云暮，故人殊未来。\n乡书不可寄，秋雁又南回。' },
+  { title:'寻南溪常山道人隐居', author:'刘长卿', dynasty:'唐', content:'一路经行处，莓苔见履痕。\n白云依静渚，春草闭闲门。\n过雨看松色，随山到水源。\n溪花与禅意，相对亦忘言。' },
+  { title:'新年作', author:'刘长卿', dynasty:'唐', content:'乡心新岁切，天畔独潸然。\n老至居人下，春归在客先。\n岭猿同旦暮，江柳共风烟。\n已似长沙傅，从今又几年。' },
+  { title:'谷口书斋寄杨补阙', author:'钱起', dynasty:'唐', content:'泉壑带茅茨，云霞生薜帷。\n竹怜新雨后，山爱夕阳时。\n闲鹭栖常早，秋花落更迟。\n家童扫萝径，昨与故人期。' },
+  { title:'酬程延秋夜即事见赠', author:'韩翃', dynasty:'唐', content:'长簟迎风早，空城澹月华。\n星河秋一雁，砧杵夜千家。\n节候看应晚，心期卧亦赊。\n向来吟秀句，不觉已鸣鸦。' },
+  { title:'阙题', author:'刘昚虚', dynasty:'唐', content:'道由白云尽，春与青溪长。\n时有落花至，远随流水香。\n闲门向山路，深柳读书堂。\n幽映每白日，清辉照衣裳。' },
+  { title:'江乡故人偶集客舍', author:'戴叔伦', dynasty:'唐', content:'天秋月又满，城阙夜千重。\n还作江南会，翻疑梦里逢。\n风枝惊暗鹊，露草覆寒蛩。\n羁旅长堪醉，相留畏晓钟。' },
+  { title:'送人东游', author:'温庭筠', dynasty:'唐', content:'荒戍落黄叶，浩然离故关。\n高风汉阳渡，初日郢门山。\n江上几人在，天涯孤棹还。\n何当重相见，尊酒慰离颜。' },
+  { title:'灞上秋居', author:'马戴', dynasty:'唐', content:'灞原风雨定，晚见雁行频。\n落叶他乡树，寒灯独夜人。\n空园白露滴，孤壁野僧邻。\n寄卧郊扉久，何门致此身。' },
+  { title:'玉台体', author:'权德舆', dynasty:'唐', content:'昨夜裙带解，今朝蟢子飞。\n铅华不可弃，莫是藁砧归。' },
+  { title:'送上人', author:'刘长卿', dynasty:'唐', content:'孤云将野鹤，岂向人间住。\n莫买沃洲山，时人已知处。' },
+  { title:'哥舒歌', author:'西鄙人', dynasty:'唐', content:'北斗七星高，哥舒夜带刀。\n至今窥牧马，不敢过临洮。' },
+  { title:'长干行·其一', author:'崔颢', dynasty:'唐', content:'君家何处住，妾住在横塘。\n停船暂借问，或恐是同乡。' },
+  { title:'长干行·其二', author:'崔颢', dynasty:'唐', content:'家临九江水，来去九江侧。\n同是长干人，生小不相识。' },
+  { title:'后宫词', author:'白居易', dynasty:'唐', content:'泪湿罗巾梦不成，夜深前殿按歌声。\n红颜未老恩先断，斜倚薰笼坐到明。' },
+  { title:'集灵台·其一', author:'张祜', dynasty:'唐', content:'日光斜照集灵台，红树花迎晓露开。\n昨夜上皇新授箓，太真含笑入帘来。' },
+  { title:'集灵台·其二', author:'张祜', dynasty:'唐', content:'虢国夫人承主恩，平明骑马入宫门。\n却嫌脂粉污颜色，淡扫蛾眉朝至尊。' },
+  { title:'赠内人', author:'张祜', dynasty:'唐', content:'禁门宫树月痕过，媚眼惟看宿鹭窠。\n斜拔玉钗灯影畔，剔开红焰救飞蛾。' },
+  { title:'瑶瑟怨', author:'温庭筠', dynasty:'唐', content:'冰簟银床梦不成，碧天如水夜云轻。\n雁声远过潇湘去，十二楼中月自明。' },
+  { title:'陇西行', author:'陈陶', dynasty:'唐', content:'誓扫匈奴不顾身，五千貂锦丧胡尘。\n可怜无定河边骨，犹是春闺梦里人。' },
+  { title:'金陵图', author:'韦庄', dynasty:'唐', content:'江雨霏霏江草齐，六朝如梦鸟空啼。\n无情最是台城柳，依旧烟笼十里堤。' },
+  { title:'已凉', author:'韩偓', dynasty:'唐', content:'碧阑干外绣帘垂，猩色屏风画折枝。\n八尺龙须方锦褥，已凉天气未寒时。' },
+  { title:'春怨', author:'刘方平', dynasty:'唐', content:'纱窗日落渐黄昏，金屋无人见泪痕。\n寂寞空庭春欲晚，梨花满地不开门。' },
+  { title:'月夜', author:'刘方平', dynasty:'唐', content:'更深月色半人家，北斗阑干南斗斜。\n今夜偏知春气暖，虫声新透绿窗纱。' },
+  { title:'行宫', author:'元稹', dynasty:'唐', content:'寥落古行宫，宫花寂寞红。\n白头宫女在，闲坐说玄宗。' },
+  { title:'何满子', author:'张祜', dynasty:'唐', content:'故国三千里，深宫二十年。\n一声何满子，双泪落君前。' },
+  { title:'近试上张籍水部', author:'朱庆馀', dynasty:'唐', content:'洞房昨夜停红烛，待晓堂前拜舅姑。\n妆罢低声问夫婿，画眉深浅入时无。' },
+  { title:'酬朱庆馀', author:'张籍', dynasty:'唐', content:'越女新妆出镜心，自知明艳更沉吟。\n齐纨未是人间贵，一曲菱歌敌万金。' },
+  { title:'回乡偶书·其二', author:'贺知章', dynasty:'唐', content:'离别家乡岁月多，近来人事半消磨。\n惟有门前镜湖水，春风不改旧时波。' },
+  { title:'桃花溪', author:'张旭', dynasty:'唐', content:'隐隐飞桥隔野烟，石矶西畔问渔船。\n桃花尽日随流水，洞在清溪何处边？' },
+  { title:'山中留客', author:'张旭', dynasty:'唐', content:'山光物态弄春晖，莫为轻阴便拟归。\n纵使晴明无雨色，入云深处亦沾衣。' },
+  { title:'移家别湖上亭', author:'戎昱', dynasty:'唐', content:'好是春风湖上亭，柳条藤蔓系离情。\n黄莺久住浑相识，欲别频啼四五声。' },
+  { title:'柏林寺南望', author:'郎士元', dynasty:'唐', content:'溪上遥闻精舍钟，泊舟微径度深松。\n青山霁后云犹在，画出东南四五峰。' },
+  { title:'听邻家吹笙', author:'郎士元', dynasty:'唐', content:'凤吹声如隔彩霞，不知墙外是谁家。\n重门深锁无寻处，疑有碧桃千树花。' },
+  { title:'寒食', author:'韩翃', dynasty:'唐', content:'春城无处不飞花，寒食东风御柳斜。\n日暮汉宫传蜡烛，轻烟散入五侯家。' },
+  { title:'江村即事', author:'司空曙', dynasty:'唐', content:'钓罢归来不系船，江村月落正堪眠。\n纵然一夜风吹去，只在芦花浅水边。' },
+  { title:'巴女谣', author:'于鹄', dynasty:'唐', content:'巴女骑牛唱竹枝，藕丝菱叶傍江时。\n不愁日暮还家错，记得芭蕉出槿篱。' },
+  { title:'夜上受降城闻笛', author:'李益', dynasty:'唐', content:'回乐峰前沙似雪，受降城外月如霜。\n不知何处吹芦管，一夜征人尽望乡。' },
+  { title:'江南曲', author:'李益', dynasty:'唐', content:'嫁得瞿塘贾，朝朝误妾期。\n早知潮有信，嫁与弄潮儿。' },
+  { title:'写情', author:'李益', dynasty:'唐', content:'水纹珍簟思悠悠，千里佳期一夕休。\n从此无心爱良夜，任他明月下西楼。' },
+  { title:'十五夜望月', author:'王建', dynasty:'唐', content:'中庭地白树栖鸦，冷露无声湿桂花。\n今夜月明人尽望，不知秋思落谁家。' },
+  { title:'雨过山村', author:'王建', dynasty:'唐', content:'雨里鸡鸣一两家，竹溪村路板桥斜。\n妇姑相唤浴蚕去，闲看中庭栀子花。' },
+  { title:'南园·其五', author:'李贺', dynasty:'唐', content:'男儿何不带吴钩，收取关山五十州。\n请君暂上凌烟阁，若个书生万户侯？' },
+  { title:'马诗·其五', author:'李贺', dynasty:'唐', content:'大漠沙如雪，燕山月似钩。\n何当金络脑，快走踏清秋。' },
+  { title:'离思', author:'元稹', dynasty:'唐', content:'曾经沧海难为水，除却巫山不是云。\n取次花丛懒回顾，半缘修道半缘君。' },
+  { title:'赠项斯', author:'杨敬之', dynasty:'唐', content:'几度见诗诗总好，及观标格过于诗。\n平生不解藏人善，到处逢人说项斯。' },
+  { title:'剑客', author:'贾岛', dynasty:'唐', content:'十年磨一剑，霜刃未曾试。\n今日把示君，谁有不平事？' },
+  { title:'题李凝幽居', author:'贾岛', dynasty:'唐', content:'闲居少邻并，草径入荒园。\n鸟宿池边树，僧敲月下门。\n过桥分野色，移石动云根。\n暂去还来此，幽期不负言。' },
+  { title:'题都城南庄', author:'崔护', dynasty:'唐', content:'去年今日此门中，人面桃花相映红。\n人面不知何处去，桃花依旧笑春风。' },
+  { title:'啰唝曲', author:'刘采春', dynasty:'唐', content:'不喜秦淮水，生憎江上船。\n载儿夫婿去，经岁又经年。' },
+  { title:'金缕衣', author:'杜秋娘', dynasty:'唐', content:'劝君莫惜金缕衣，劝君惜取少年时。\n花开堪折直须折，莫待无花空折枝。' },
+  { title:'遣悲怀·其二', author:'元稹', dynasty:'唐', content:'昔日戏言身后意，今朝都到眼前来。\n衣裳已施行看尽，针线犹存未忍开。\n尚想旧情怜婢仆，也曾因梦送钱财。\n诚知此恨人人有，贫贱夫妻百事哀。' },
+  { title:'春词', author:'刘禹锡', dynasty:'唐', content:'新妆宜面下朱楼，深锁春光一院愁。\n行到中庭数花朵，蜻蜓飞上玉搔头。' },
+  { title:'月夜', author:'刘方平', dynasty:'唐', content:'更深月色半人家，北斗阑干南斗斜。\n今夜偏知春气暖，虫声新透绿窗纱。' },
+  { title:'小至', author:'杜甫', dynasty:'唐', content:'天时人事日相催，冬至阳生春又来。\n刺绣五纹添弱线，吹葭六管动浮灰。\n岸容待腊将舒柳，山意冲寒欲放梅。\n云物不殊乡国异，教儿且覆掌中杯。' },
+  { title:'咏怀古迹·其一', author:'杜甫', dynasty:'唐', content:'支离东北风尘际，漂泊西南天地间。\n三峡楼台淹日月，五溪衣服共云山。\n羯胡事主终无赖，词客哀时且未还。\n庾信平生最萧瑟，暮年诗赋动江关。' },
+  { title:'咏怀古迹·其二', author:'杜甫', dynasty:'唐', content:'摇落深知宋玉悲，风流儒雅亦吾师。\n怅望千秋一洒泪，萧条异代不同时。\n江山故宅空文藻，云雨荒台岂梦思。\n最是楚宫俱泯灭，舟人指点到今疑。' },
+  { title:'哀江头', author:'杜甫', dynasty:'唐', content:'少陵野老吞声哭，春日潜行曲江曲。\n江头宫殿锁千门，细柳新蒲为谁绿？\n忆昔霓旌下南苑，苑中万物生颜色。\n昭阳殿里第一人，同辇随君侍君侧。\n辇前才人带弓箭，白马嚼啮黄金勒。\n翻身向天仰射云，一笑正坠双飞翼。\n明眸皓齿今何在？血污游魂归不得。\n清渭东流剑阁深，去住彼此无消息。\n人生有情泪沾臆，江水江花岂终极！\n黄昏胡骑尘满城，欲往城南望城北。' },
+
+  // ======== 扩编 — 近现代新诗 + 诗词续补 ========
+  { title:'雨巷', author:'戴望舒', dynasty:'近现代', content:'撑着油纸伞，独自\n彷徨在悠长、悠长\n又寂寥的雨巷，\n我希望逢着\n一个丁香一样的\n结着愁怨的姑娘。\n她是有\n丁香一样的颜色，\n丁香一样的芬芳，\n丁香一样的忧愁，\n在雨中哀怨，\n哀怨又彷徨。\n她彷徨在这寂寥的雨巷，\n撑着油纸伞\n像我一样，\n像我一样地\n默默彳亍着，\n冷漠、凄清，又惆怅。' },
+  { title:'死水', author:'闻一多', dynasty:'近现代', content:'这是一沟绝望的死水，\n清风吹不起半点漪沦。\n不如多扔些破铜烂铁，\n爽性泼你的剩菜残羹。\n也许铜的要绿成翡翠，\n铁罐上锈出几瓣桃花。\n再让油腻织一层罗绮，\n霉菌给他蒸出些云霞。\n让死水酵成一沟绿酒，\n漂满了珍珠似的白沫。\n小珠们笑声变成大珠，\n又被偷酒的花蚊咬破。\n那么一沟绝望的死水，\n也就夸得上几分鲜明。\n如果青蛙耐不住寂寞，\n又算死水叫出了歌声。\n这是一沟绝望的死水，\n这里断不是美的所在。\n不如让给丑恶来开垦，\n看它造出个什么世界。' },
+  { title:'沙扬娜拉', author:'徐志摩', dynasty:'近现代', content:'最是那一低头的温柔，\n像一朵水莲花不胜凉风的娇羞，\n道一声珍重，道一声珍重，\n那一声珍重里有蜜甜的忧愁——\n沙扬娜拉！' },
+  { title:'你是人间的四月天', author:'林徽因', dynasty:'近现代', content:'我说你是人间的四月天；\n笑响点亮了四面风；\n轻灵在春的光艳中交舞着变。\n你是四月早天里的云烟，\n黄昏吹着风的软，\n星子在无意中闪，\n细雨点洒在花前。\n那轻，那娉婷，你是，\n鲜妍百花的冠冕你戴着，\n你是天真，庄严，\n你是夜夜的月圆。\n雪化后那片鹅黄，你像；\n新鲜初放芽的绿，你是；\n柔嫩喜悦，\n水光浮动着你梦期待中白莲。\n你是一树一树的花开，\n是燕在梁间呢喃，\n——你是爱，是暖，是希望，\n你是人间的四月天！' },
+  { title:'致橡树', author:'舒婷', dynasty:'近现代', content:'我如果爱你——\n绝不像攀援的凌霄花，\n借你的高枝炫耀自己；\n我如果爱你——\n绝不学痴情的鸟儿，\n为绿荫重复单调的歌曲；\n也不止像泉源，\n常年送来清凉的慰藉；\n也不止像险峰，\n增加你的高度，衬托你的威仪。\n甚至日光，甚至春雨。\n不，这些都还不够！\n我必须是你近旁的一株木棉，\n作为树的形象和你站在一起。\n根，紧握在地下；\n叶，相触在云里。\n每一阵风过，\n我们都互相致意，\n但没有人，听懂我们的言语。' },
+  { title:'远和近', author:'顾城', dynasty:'近现代', content:'你，\n一会看我，\n一会看云。\n我觉得，\n你看我时很远，\n你看云时很近。' },
+  { title:'一代人', author:'顾城', dynasty:'近现代', content:'黑夜给了我黑色的眼睛，\n我却用它寻找光明。' },
+  { title:'春暖花开', author:'海子', dynasty:'近现代', content:'从明天起，做一个幸福的人\n喂马，劈柴，周游世界\n从明天起，关心粮食和蔬菜\n我有一所房子，面朝大海，春暖花开' },
+  { title:'相信未来', author:'食指', dynasty:'近现代', content:'当蜘蛛网无情地查封了我的炉台，\n当灰烬的余烟叹息着贫困的悲哀，\n我依然固执地铺平失望的灰烬，\n用美丽的雪花写下：相信未来。\n当我的紫葡萄化为深秋的露水，\n当我的鲜花依偎在别人的情怀，\n我依然固执地用凝霜的枯藤，\n在凄凉的大地上写下：相信未来。\n我要用手指那涌向天边的排浪，\n我要用手掌那托住太阳的大海，\n摇曳着曙光那枝温暖漂亮的笔杆，\n用孩子的笔体写下：相信未来。' },
+  { title:'有的人', author:'臧克家', dynasty:'近现代', content:'有的人活着，他已经死了；\n有的人死了，他还活着。\n有的人骑在人民头上："呵，我多伟大！"\n有的人俯下身子给人民当牛马。\n有的人把名字刻入石头，想"不朽"；\n有的人情愿作野草，等着地下的火烧。\n有的人他活着别人就不能活；\n有的人他活着为了多数人更好地活。' },
+  { title:'老马', author:'臧克家', dynasty:'近现代', content:'总得叫大车装个够，\n它横竖不说一句话，\n背上的压力往肉里扣，\n它把头沉重地垂下！\n这刻不知道下刻的命，\n它有泪只往心里咽，\n眼里飘来一道鞭影，\n它抬起头望望前面。' },
+  { title:'双桅船', author:'舒婷', dynasty:'近现代', content:'雾打湿了我的双翼\n可风却不容我再迟疑\n岸啊，心爱的岸\n昨天刚刚和你告别\n今天你又在这里\n明天我们将在\n另一个纬度相遇\n是一场风暴、一盏灯\n把我们联系在一起\n是另一场风暴、另一盏灯\n使我们再分东西\n不怕天涯海角\n岂在朝朝夕夕\n你在我的航程上\n我在你的视线里' },
+  { title:'雪花的快乐', author:'徐志摩', dynasty:'近现代', content:'假如我是一朵雪花，\n翩翩的在半空里潇洒，\n我一定认清我的方向——\n飞扬，飞扬，飞扬，\n这地面上有我的方向。\n不去那冷寞的幽谷，\n不去那凄清的山麓，\n也不上荒街去惆怅——\n飞扬，飞扬，飞扬，\n——你看，我有我的方向！\n在半空里娟娟的飞舞，\n认明了那清幽的住处，\n等着她来花园里探望——\n飞扬，飞扬，飞扬，\n——啊，她身上有朱砂梅的清香！\n那时我凭藉我的身轻，\n盈盈的，沾住了她的衣襟，\n贴近她柔波似的心胸——\n消溶，消溶，消溶——\n溶入了她柔波似的心胸！' },
+  { title:'纸船', author:'冰心', dynasty:'近现代', content:'我从不肯妄弃了一张纸，\n总是留着——留着，\n叠成一只一只很小的船儿，\n从舟上抛下在海里。\n有的被天风吹卷到舟中的窗里，\n有的被海浪打湿，沾在船头上。\n我仍是不灰心的每天的叠着，\n总希望有一只能流到我要它到的地方去。\n母亲，倘若你梦中看见一只很小的白船儿，\n不要惊讶它无端入梦。\n这是你至爱的女儿含着泪叠的，\n万水千山，求它载着她的爱和悲哀归去。' },
+
+  // ======== 扩编五 — 诗经·楚辞·汉魏六朝补遗 ========
+  { title:'关雎', author:'佚名', dynasty:'先秦', content:'关关雎鸠，在河之洲。\n窈窕淑女，君子好逑。\n参差荇菜，左右流之。\n窈窕淑女，寤寐求之。\n求之不得，寤寐思服。\n悠哉悠哉，辗转反侧。\n参差荇菜，左右采之。\n窈窕淑女，琴瑟友之。\n参差荇菜，左右芼之。\n窈窕淑女，钟鼓乐之。' },
+  { title:'汉广', author:'佚名', dynasty:'先秦', content:'南有乔木，不可休思。\n汉有游女，不可求思。\n汉之广矣，不可泳思。\n江之永矣，不可方思。\n翘翘错薪，言刈其楚。\n之子于归，言秣其马。\n汉之广矣，不可泳思。\n江之永矣，不可方思。' },
+  { title:'摽有梅', author:'佚名', dynasty:'先秦', content:'摽有梅，其实七兮。\n求我庶士，迨其吉兮。\n摽有梅，其实三兮。\n求我庶士，迨其今兮。\n摽有梅，顷筐塈之。\n求我庶士，迨其谓之。' },
+  { title:'野有死麕', author:'佚名', dynasty:'先秦', content:'野有死麕，白茅包之。\n有女怀春，吉士诱之。\n林有朴樕，野有死鹿。\n白茅纯束，有女如玉。\n舒而脱脱兮，无感我帨兮，无使尨也吠。' },
+  { title:'燕燕', author:'佚名', dynasty:'先秦', content:'燕燕于飞，差池其羽。\n之子于归，远送于野。\n瞻望弗及，泣涕如雨。\n燕燕于飞，颉之颃之。\n之子于归，远于将之。\n瞻望弗及，伫立以泣。' },
+  { title:'击鼓', author:'佚名', dynasty:'先秦', content:'击鼓其镗，踊跃用兵。\n土国城漕，我独南行。\n从孙子仲，平陈与宋。\n不我以归，忧心有忡。\n爰居爰处？爰丧其马？\n于以求之？于林之下。\n死生契阔，与子成说。\n执子之手，与子偕老。\n于嗟阔兮，不我活兮。\n于嗟洵兮，不我信兮。' },
+  { title:'雄雉', author:'佚名', dynasty:'先秦', content:'雄雉于飞，泄泄其羽。\n我之怀矣，自诒伊阻。\n雄雉于飞，下上其音。\n展矣君子，实劳我心。\n瞻彼日月，悠悠我思。\n道之云远，曷云能来？' },
+  { title:'式微', author:'佚名', dynasty:'先秦', content:'式微，式微，胡不归？\n微君之故，胡为乎中露！\n式微，式微，胡不归？\n微君之躬，胡为乎泥中！' },
+  { title:'北门', author:'佚名', dynasty:'先秦', content:'出自北门，忧心殷殷。\n终窭且贫，莫知我艰。\n已焉哉！天实为之，谓之何哉！\n王事适我，政事一埤益我。\n我入自外，室人交徧谪我。\n已焉哉！天实为之，谓之何哉！' },
+  { title:'相鼠', author:'佚名', dynasty:'先秦', content:'相鼠有皮，人而无仪！\n人而无仪，不死何为？\n相鼠有齿，人而无止！\n人而无止，不死何俟？\n相鼠有体，人而无礼！\n人而无礼，胡不遄死？' },
+  { title:'淇奥', author:'佚名', dynasty:'先秦', content:'瞻彼淇奥，绿竹猗猗。\n有匪君子，如切如磋，如琢如磨。\n瑟兮僴兮，赫兮咺兮。\n有匪君子，终不可谖兮。\n瞻彼淇奥，绿竹青青。\n有匪君子，充耳琇莹，会弁如星。\n瑟兮僴兮，赫兮咺兮。\n有匪君子，终不可谖兮。' },
+  { title:'考槃', author:'佚名', dynasty:'先秦', content:'考槃在涧，硕人之宽。\n独寐寤言，永矢弗谖。\n考槃在阿，硕人之薖。\n独寐寤歌，永矢弗过。\n考槃在陆，硕人之轴。\n独寐寤宿，永矢弗告。' },
+  { title:'山鬼', author:'屈原', dynasty:'先秦', content:'若有人兮山之阿，被薜荔兮带女萝。\n既含睇兮又宜笑，子慕予兮善窈窕。\n乘赤豹兮从文狸，辛夷车兮结桂旗。\n被石兰兮带杜衡，折芳馨兮遗所思。\n余处幽篁兮终不见天，路险难兮独后来。\n表独立兮山之上，云容容兮而在下。\n杳冥冥兮羌昼晦，东风飘兮神灵雨。\n留灵修兮憺忘归，岁既晏兮孰华予。' },
+  { title:'国殇', author:'屈原', dynasty:'先秦', content:'操吴戈兮被犀甲，车错毂兮短兵接。\n旌蔽日兮敌若云，矢交坠兮士争先。\n凌余阵兮躐余行，左骖殪兮右刃伤。\n霾两轮兮絷四马，援玉枹兮击鸣鼓。\n天时怼兮威灵怒，严杀尽兮弃原野。\n出不入兮往不反，平原忽兮路超远。\n带长剑兮挟秦弓，首身离兮心不惩。\n诚既勇兮又以武，终刚强兮不可凌。\n身既死兮神以灵，子魂魄兮为鬼雄。' },
+  { title:'少司命', author:'屈原', dynasty:'先秦', content:'秋兰兮麋芜，罗生兮堂下。\n绿叶兮素华，芳菲菲兮袭予。\n夫人自有兮美子，荪何以兮愁苦？\n秋兰兮青青，绿叶兮紫茎。\n满堂兮美人，忽独与余兮目成。\n入不言兮出不辞，乘回风兮载云旗。\n悲莫悲兮生别离，乐莫乐兮新相知。' },
+  { title:'东君', author:'屈原', dynasty:'先秦', content:'暾将出兮东方，照吾槛兮扶桑。\n抚余马兮安驱，夜皎皎兮既明。\n驾龙辀兮乘雷，载云旗兮委蛇。\n长太息兮将上，心低徊兮顾怀。\n羌声色兮娱人，观者憺兮忘归。' },
+  { title:'西北有高楼', author:'佚名', dynasty:'汉', content:'西北有高楼，上与浮云齐。\n交疏结绮窗，阿阁三重阶。\n上有弦歌声，音响一何悲！\n谁能为此曲，无乃杞梁妻。\n清商随风发，中曲正徘徊。\n一弹再三叹，慷慨有余哀。\n不惜歌者苦，但伤知音稀。\n愿为双鸿鹄，奋翅起高飞。' },
+  { title:'庭中有奇树', author:'佚名', dynasty:'汉', content:'庭中有奇树，绿叶发华滋。\n攀条折其荣，将以遗所思。\n馨香盈怀袖，路远莫致之。\n此物何足贵，但感别经时。' },
+  { title:'明月何皎皎', author:'佚名', dynasty:'汉', content:'明月何皎皎，照我罗床纬。\n忧愁不能寐，揽衣起徘徊。\n客行虽云乐，不如早旋归。\n出户独彷徨，愁思当告谁！\n引领还入房，泪下沾裳衣。' },
+  { title:'生年不满百', author:'佚名', dynasty:'汉', content:'生年不满百，常怀千岁忧。\n昼短苦夜长，何不秉烛游！\n为乐当及时，何能待来兹？\n愚者爱惜费，但为后世嗤。\n仙人王子乔，难可与等期。' },
+  { title:'客从远方来', author:'佚名', dynasty:'汉', content:'客从远方来，遗我一端绮。\n相去万余里，故人心尚尔。\n文彩双鸳鸯，裁为合欢被。\n著以长相思，缘以结不解。\n以胶投漆中，谁能别离此？' },
+  { title:'十五从军征', author:'佚名', dynasty:'汉', content:'十五从军征，八十始得归。\n道逢乡里人："家中有阿谁？"\n"遥看是君家，松柏冢累累。"\n兔从狗窦入，雉从梁上飞。\n中庭生旅谷，井上生旅葵。\n舂谷持作饭，采葵持作羹。\n羹饭一时熟，不知贻阿谁。\n出门东向看，泪落沾我衣。' },
+  { title:'蒿里行', author:'曹操', dynasty:'汉末', content:'关东有义士，兴兵讨群凶。\n初期会盟津，乃心在咸阳。\n军合力不齐，踌躇而雁行。\n势利使人争，嗣还自相戕。\n淮南弟称号，刻玺于北方。\n铠甲生虮虱，万姓以死亡。\n白骨露于野，千里无鸡鸣。\n生民百遗一，念之断人肠。' },
+  { title:'赠从弟·其二', author:'刘桢', dynasty:'汉末', content:'亭亭山上松，瑟瑟谷中风。\n风声一何盛，松枝一何劲！\n冰霜正惨凄，终岁常端正。\n岂不罹凝寒，松柏有本性。' },
+  { title:'七哀诗', author:'王粲', dynasty:'汉末', content:'西京乱无象，豺虎方遘患。\n复弃中国去，委身适荆蛮。\n亲戚对我悲，朋友相追攀。\n出门无所见，白骨蔽平原。\n路有饥妇人，抱子弃草间。\n顾闻号泣声，挥涕独不还。\n"未知身死处，何能两相完？"\n驱马弃之去，不忍听此言。\n南登霸陵岸，回首望长安。\n悟彼下泉人，喟然伤心肝。' },
+  { title:'白马篇', author:'曹植', dynasty:'三国', content:'白马饰金羁，连翩西北驰。\n借问谁家子？幽并游侠儿。\n少小去乡邑，扬声沙漠垂。\n宿昔秉良弓，楛矢何参差。\n控弦破左的，右发摧月支。\n仰手接飞猱，俯身散马蹄。\n狡捷过猴猿，勇剽若豹螭。\n边城多警急，虏骑数迁移。\n羽檄从北来，厉马登高堤。\n长驱蹈匈奴，左顾凌鲜卑。\n弃身锋刃端，性命安可怀？\n父母且不顾，何言子与妻！\n名编壮士籍，不得中顾私。\n捐躯赴国难，视死忽如归！' },
+  { title:'归园田居·其二', author:'陶渊明', dynasty:'东晋', content:'野外罕人事，穷巷寡轮鞅。\n白日掩荆扉，虚室绝尘想。\n时复墟曲中，披草共来往。\n相见无杂言，但道桑麻长。\n桑麻日已长，我土日已广。\n常恐霜霰至，零落同草莽。' },
+  { title:'移居·其一', author:'陶渊明', dynasty:'东晋', content:'昔欲居南村，非为卜其宅。\n闻多素心人，乐与数晨夕。\n怀此颇有年，今日从兹役。\n敝庐何必广，取足蔽床席。\n邻曲时时来，抗言谈在昔。\n奇文共欣赏，疑义相与析。' },
+  { title:'杂诗·其一', author:'陶渊明', dynasty:'东晋', content:'人生无根蒂，飘如陌上尘。\n分散逐风转，此已非常身。\n落地为兄弟，何必骨肉亲！\n得欢当作乐，斗酒聚比邻。\n盛年不重来，一日难再晨。\n及时当勉励，岁月不待人。' },
+  { title:'读山海经·其十', author:'陶渊明', dynasty:'东晋', content:'精卫衔微木，将以填沧海。\n刑天舞干戚，猛志固常在。\n同物既无虑，化去不复悔。\n徒设在昔心，良辰讵可待。' },
+  { title:'归去来兮辞（节选）', author:'陶渊明', dynasty:'东晋', content:'归去来兮，田园将芜胡不归？\n既自以心为形役，奚惆怅而独悲？\n悟已往之不谏，知来者之可追。\n实迷途其未远，觉今是而昨非。\n舟遥遥以轻飏，风飘飘而吹衣。\n问征夫以前路，恨晨光之熹微。' },
+  { title:'西湖曲', author:'佚名', dynasty:'南朝', content:'忆梅下西洲，折梅寄江北。\n单衫杏子红，双鬓鸦雏色。\n西洲在何处？两桨桥头渡。\n日暮伯劳飞，风吹乌臼树。\n树下即门前，门中露翠钿。\n开门郎不至，出门采红莲。\n采莲南塘秋，莲花过人头。\n低头弄莲子，莲子清如水。\n置莲怀袖中，莲心彻底红。\n忆郎郎不至，仰首望飞鸿。' },
+  { title:'子夜歌', author:'佚名', dynasty:'南朝', content:'夜长不得眠，明月何灼灼。\n想闻散唤声，虚应空中诺。' },
+
+  // ======== 扩编六 — 精选千家诗续 ========
+  { title:'登岳阳楼', author:'杜甫', dynasty:'唐', content:'昔闻洞庭水，今上岳阳楼。\n吴楚东南坼，乾坤日夜浮。\n亲朋无一字，老病有孤舟。\n戎马关山北，凭轩涕泗流。' },
+  { title:'赠孟浩然', author:'李白', dynasty:'唐', content:'吾爱孟夫子，风流天下闻。\n红颜弃轩冕，白首卧松云。\n醉月频中圣，迷花不事君。\n高山安可仰，徒此揖清芬。' },
+  { title:'渡湘江', author:'杜审言', dynasty:'唐', content:'迟日园林悲昔游，今春花鸟作边愁。\n独怜京国人南窜，不似湘江水北流。' },
+  { title:'题大庾岭北驿', author:'宋之问', dynasty:'唐', content:'阳月南飞雁，传闻至此回。\n我行殊未已，何日复归来。\n江静潮初落，林昏瘴不开。\n明朝望乡处，应见陇头梅。' },
+  { title:'感遇·其一', author:'张九龄', dynasty:'唐', content:'兰叶春葳蕤，桂华秋皎洁。\n欣欣此生意，自尔为佳节。\n谁知林栖者，闻风坐相悦。\n草木有本心，何求美人折？' },
+  { title:'感遇·其二', author:'张九龄', dynasty:'唐', content:'江南有丹橘，经冬犹绿林。\n岂伊地气暖，自有岁寒心。\n可以荐嘉客，奈何阻重深。\n运命惟所遇，循环不可寻。\n徒言树桃李，此木岂无阴？' },
+  { title:'与高适薛据登慈恩寺浮图', author:'岑参', dynasty:'唐', content:'塔势如涌出，孤高耸天宫。\n登临出世界，磴道盘虚空。\n突兀压神州，峥嵘如鬼工。\n四角碍白日，七层摩苍穹。\n下窥指高鸟，俯听闻惊风。\n连山若波涛，奔走似朝东。' },
+  { title:'贼退示官吏', author:'元结', dynasty:'唐', content:'昔岁逢太平，山林二十年。\n泉源在庭户，洞壑当门前。\n井税有常期，日晏犹得眠。\n忽然遭世变，数岁亲戎旃。\n今来典斯郡，山夷又纷然。\n城小贼不屠，人贫伤可怜。\n是以陷邻境，此州独见全。\n使臣将王命，岂不如贼焉？\n今彼征敛者，迫之如火煎。\n谁能绝人命，以作时世贤？' },
+  { title:'渔翁', author:'柳宗元', dynasty:'唐', content:'渔翁夜傍西岩宿，晓汲清湘燃楚竹。\n烟销日出不见人，欸乃一声山水绿。\n回看天际下中流，岩上无心云相逐。' },
+  { title:'晨诣超师院读禅经', author:'柳宗元', dynasty:'唐', content:'汲井漱寒齿，清心拂尘服。\n闲持贝叶书，步出东斋读。\n真源了无取，妄迹世所逐。\n遗言冀可冥，缮性何由熟。\n道人庭宇静，苔色连深竹。\n日出雾露余，青松如膏沐。\n澹然离言说，悟悦心自足。' },
+  { title:'山石', author:'韩愈', dynasty:'唐', content:'山石荦确行径微，黄昏到寺蝙蝠飞。\n升堂坐阶新雨足，芭蕉叶大栀子肥。\n僧言古壁佛画好，以火来照所见稀。\n铺床拂席置羹饭，疏粝亦足饱我饥。\n夜深静卧百虫绝，清月出岭光入扉。\n天明独去无道路，出入高下穷烟霏。\n山红涧碧纷烂漫，时见松枥皆十围。\n当流赤足踏涧石，水声激激风吹衣。\n人生如此自可乐，岂必局束为人鞿？\n嗟哉吾党二三子，安得至老不更归！' },
+  { title:'八月十五夜赠张功曹', author:'韩愈', dynasty:'唐', content:'纤云四卷天无河，清风吹空月舒波。\n沙平水息声影绝，一杯相属君当歌。\n君歌声酸辞且苦，不能听终泪如雨。\n洞庭连天九疑高，蛟龙出没猩鼯号。\n十生九死到官所，幽居默默如藏逃。\n下床畏蛇食畏药，海气湿蛰熏腥臊。\n昨者州前捶大鼓，嗣皇继圣登夔皋。\n赦书一日行万里，罪从大辟皆除死。\n迁者追回流者还，涤瑕荡垢清朝班。\n州家申名使家抑，坎轲只得移荆蛮。\n判司卑官不堪说，未免捶楚尘埃间。\n同时辈流多上道，天路幽险难追攀。' },
+  { title:'调张籍', author:'韩愈', dynasty:'唐', content:'李杜文章在，光焰万丈长。\n不知群儿愚，那用故谤伤。\n蚍蜉撼大树，可笑不自量。\n伊我生其后，举颈遥相望。\n夜梦多见之，昼思反微茫。\n徒观斧凿痕，不瞩治水航。\n想当施手时，巨刃磨天扬。\n垠崖划崩豁，乾坤摆雷硠。' },
+  { title:'左迁至蓝关示侄孙湘', author:'韩愈', dynasty:'唐', content:'一封朝奏九重天，夕贬潮阳路八千。\n欲为圣明除弊事，肯将衰朽惜残年。\n云横秦岭家何在？雪拥蓝关马不前。\n知汝远来应有意，好收吾骨瘴江边。' },
+  { title:'草', author:'白居易', dynasty:'唐', content:'离离原上草，一岁一枯荣。\n野火烧不尽，春风吹又生。\n远芳侵古道，晴翠接荒城。\n又送王孙去，萋萋满别情。' },
+  { title:'轻肥', author:'白居易', dynasty:'唐', content:'意气骄满路，鞍马光照尘。\n借问何为者，人称是内臣。\n朱绂皆大夫，紫绶或将军。\n夸赴军中宴，走马去如云。\n樽罍溢九酝，水陆罗八珍。\n果擘洞庭橘，脍切天池鳞。\n食饱心自若，酒酣气益振。\n是岁江南旱，衢州人食人。' },
+  { title:'放言·其三', author:'白居易', dynasty:'唐', content:'赠君一法决狐疑，不用钻龟与祝蓍。\n试玉要烧三日满，辨材须待七年期。\n周公恐惧流言日，王莽谦恭未篡时。\n向使当初身便死，一生真伪复谁知？' },
+  { title:'南浦别', author:'白居易', dynasty:'唐', content:'南浦凄凄别，西风袅袅秋。\n一看肠一断，好去莫回头。' },
+  { title:'望月有感', author:'白居易', dynasty:'唐', content:'时难年荒世业空，弟兄羁旅各西东。\n田园寥落干戈后，骨肉流离道路中。\n吊影分为千里雁，辞根散作九秋蓬。\n共看明月应垂泪，一夜乡心五处同。' },
+  { title:'游子吟', author:'孟郊', dynasty:'唐', content:'慈母手中线，游子身上衣。\n临行密密缝，意恐迟迟归。\n谁言寸草心，报得三春晖。' },
+  { title:'登科后', author:'孟郊', dynasty:'唐', content:'昔日龌龊不足夸，今朝放荡思无涯。\n春风得意马蹄疾，一日看尽长安花。' },
+  { title:'竹枝词', author:'刘禹锡', dynasty:'唐', content:'杨柳青青江水平，闻郎江上唱歌声。\n东边日出西边雨，道是无晴却有晴。' },
+  { title:'石头城', author:'刘禹锡', dynasty:'唐', content:'山围故国周遭在，潮打空城寂寞回。\n淮水东边旧时月，夜深还过女墙来。' },
+  { title:'再游玄都观', author:'刘禹锡', dynasty:'唐', content:'百亩庭中半是苔，桃花净尽菜花开。\n种桃道士归何处？前度刘郎今又来。' },
+  { title:'过华清宫绝句', author:'杜牧', dynasty:'唐', content:'长安回望绣成堆，山顶千门次第开。\n一骑红尘妃子笑，无人知是荔枝来。' },
+  { title:'将赴吴兴登乐游原', author:'杜牧', dynasty:'唐', content:'清时有味是无能，闲爱孤云静爱僧。\n欲把一麾江海去，乐游原上望昭陵。' },
+  { title:'寄扬州韩绰判官', author:'杜牧', dynasty:'唐', content:'青山隐隐水迢迢，秋尽江南草未凋。\n二十四桥明月夜，玉人何处教吹箫。' },
+  { title:'遣怀', author:'杜牧', dynasty:'唐', content:'落魄江湖载酒行，楚腰纤细掌中轻。\n十年一觉扬州梦，赢得青楼薄幸名。' },
+  { title:'秋夕', author:'杜牧', dynasty:'唐', content:'银烛秋光冷画屏，轻罗小扇扑流萤。\n天阶夜色凉如水，卧看牵牛织女星。' },
+  { title:'寄令狐郎中', author:'李商隐', dynasty:'唐', content:'嵩云秦树久离居，双鲤迢迢一纸书。\n休问梁园旧宾客，茂陵秋雨病相如。' },
+  { title:'杜司勋', author:'李商隐', dynasty:'唐', content:'高楼风雨感斯文，短翼差池不及群。\n刻意伤春复伤别，人间惟有杜司勋。' },
+  { title:'泊秦淮', author:'杜牧', dynasty:'唐', content:'烟笼寒水月笼沙，夜泊秦淮近酒家。\n商女不知亡国恨，隔江犹唱后庭花。' },
+  { title:'山行', author:'杜牧', dynasty:'唐', content:'远上寒山石径斜，白云生处有人家。\n停车坐爱枫林晚，霜叶红于二月花。' },
+  { title:'题乌江亭', author:'杜牧', dynasty:'唐', content:'胜败兵家事不期，包羞忍耻是男儿。\n江东子弟多才俊，卷土重来未可知。' },
+  { title:'长安秋望', author:'赵嘏', dynasty:'唐', content:'云物凄凉拂曙流，汉家宫阙动高秋。\n残星几点雁横塞，长笛一声人倚楼。\n紫艳半开篱菊静，红衣落尽渚莲愁。\n鲈鱼正美不归去，空戴南冠学楚囚。' },
+  { title:'望月怀远', author:'张九龄', dynasty:'唐', content:'海上生明月，天涯共此时。\n情人怨遥夜，竟夕起相思。\n灭烛怜光满，披衣觉露滋。\n不堪盈手赠，还寝梦佳期。' },
+  { title:'芙蓉楼送辛渐', author:'王昌龄', dynasty:'唐', content:'寒雨连江夜入吴，平明送客楚山孤。\n洛阳亲友如相问，一片冰心在玉壶。' },
+  { title:'出塞', author:'王昌龄', dynasty:'唐', content:'秦时明月汉时关，万里长征人未还。\n但使龙城飞将在，不教胡马度阴山。' },
+  { title:'从军行', author:'王昌龄', dynasty:'唐', content:'青海长云暗雪山，孤城遥望玉门关。\n黄沙百战穿金甲，不破楼兰终不还。' },
+  { title:'新嫁娘', author:'王建', dynasty:'唐', content:'三日入厨下，洗手作羹汤。\n未谙姑食性，先遣小姑尝。' },
+  { title:'赠别', author:'杜牧', dynasty:'唐', content:'多情却似总无情，唯觉樽前笑不成。\n蜡烛有心还惜别，替人垂泪到天明。' },
+  { title:'无题', author:'李商隐', dynasty:'唐', content:'相见时难别亦难，东风无力百花残。\n春蚕到死丝方尽，蜡炬成灰泪始干。\n晓镜但愁云鬓改，夜吟应觉月光寒。\n蓬山此去无多路，青鸟殷勤为探看。' },
+  { title:'贾生', author:'李商隐', dynasty:'唐', content:'宣室求贤访逐臣，贾生才调更无伦。\n可怜夜半虚前席，不问苍生问鬼神。' },
+  { title:'夜雨寄北', author:'李商隐', dynasty:'唐', content:'君问归期未有期，巴山夜雨涨秋池。\n何当共剪西窗烛，却话巴山夜雨时。' },
+  { title:'嫦娥', author:'李商隐', dynasty:'唐', content:'云母屏风烛影深，长河渐落晓星沉。\n嫦娥应悔偷灵药，碧海青天夜夜心。' },
+  { title:'秋词', author:'刘禹锡', dynasty:'唐', content:'自古逢秋悲寂寥，我言秋日胜春朝。\n晴空一鹤排云上，便引诗情到碧霄。' },
+  { title:'浪淘沙', author:'刘禹锡', dynasty:'唐', content:'九曲黄河万里沙，浪淘风簸自天涯。\n如今直上银河去，同到牵牛织女家。' },
+  { title:'望洞庭', author:'刘禹锡', dynasty:'唐', content:'湖光秋月两相和，潭面无风镜未磨。\n遥望洞庭山水翠，白银盘里一青螺。' },
+  { title:'赋得古原草送别', author:'白居易', dynasty:'唐', content:'离离原上草，一岁一枯荣。\n野火烧不尽，春风吹又生。\n远芳侵古道，晴翠接荒城。\n又送王孙去，萋萋满别情。' },
+  { title:'悯农·其一', author:'李绅', dynasty:'唐', content:'春种一粒粟，秋收万颗子。\n四海无闲田，农夫犹饿死。' },
+  { title:'悯农·其二', author:'李绅', dynasty:'唐', content:'锄禾日当午，汗滴禾下土。\n谁知盘中餐，粒粒皆辛苦。' },
+  { title:'江雪', author:'柳宗元', dynasty:'唐', content:'千山鸟飞绝，万径人踪灭。\n孤舟蓑笠翁，独钓寒江雪。' },
+  { title:'寻隐者不遇', author:'贾岛', dynasty:'唐', content:'松下问童子，言师采药去。\n只在此山中，云深不知处。' },
+  { title:'枫桥夜泊', author:'张继', dynasty:'唐', content:'月落乌啼霜满天，江枫渔火对愁眠。\n姑苏城外寒山寺，夜半钟声到客船。' },
+  { title:'滁州西涧', author:'韦应物', dynasty:'唐', content:'独怜幽草涧边生，上有黄鹂深树鸣。\n春潮带雨晚来急，野渡无人舟自横。' },
+  { title:'塞下曲', author:'卢纶', dynasty:'唐', content:'月黑雁飞高，单于夜遁逃。\n欲将轻骑逐，大雪满弓刀。' },
+  { title:'江南逢李龟年', author:'杜甫', dynasty:'唐', content:'岐王宅里寻常见，崔九堂前几度闻。\n正是江南好风景，落花时节又逢君。' },
+  { title:'春望', author:'杜甫', dynasty:'唐', content:'国破山河在，城春草木深。\n感时花溅泪，恨别鸟惊心。\n烽火连三月，家书抵万金。\n白头搔更短，浑欲不胜簪。' },
+  { title:'登高', author:'杜甫', dynasty:'唐', content:'风急天高猿啸哀，渚清沙白鸟飞回。\n无边落木萧萧下，不尽长江滚滚来。\n万里悲秋常作客，百年多病独登台。\n艰难苦恨繁霜鬓，潦倒新停浊酒杯。' },
+  { title:'闻官军收河南河北', author:'杜甫', dynasty:'唐', content:'剑外忽传收蓟北，初闻涕泪满衣裳。\n却看妻子愁何在，漫卷诗书喜欲狂。\n白日放歌须纵酒，青春作伴好还乡。\n即从巴峡穿巫峡，便下襄阳向洛阳。' },
+  { title:'绝句', author:'杜甫', dynasty:'唐', content:'两个黄鹂鸣翠柳，一行白鹭上青天。\n窗含西岭千秋雪，门泊东吴万里船。' },
+  { title:'蜀相', author:'杜甫', dynasty:'唐', content:'丞相祠堂何处寻，锦官城外柏森森。\n映阶碧草自春色，隔叶黄鹂空好音。\n三顾频烦天下计，两朝开济老臣心。\n出师未捷身先死，长使英雄泪满襟。' },
+  { title:'客至', author:'杜甫', dynasty:'唐', content:'舍南舍北皆春水，但见群鸥日日来。\n花径不曾缘客扫，蓬门今始为君开。\n盘飧市远无兼味，樽酒家贫只旧醅。\n肯与邻翁相对饮，隔篱呼取尽余杯。' },
+  { title:'春夜喜雨', author:'杜甫', dynasty:'唐', content:'好雨知时节，当春乃发生。\n随风潜入夜，润物细无声。\n野径云俱黑，江船火独明。\n晓看红湿处，花重锦官城。' },
+  { title:'望岳', author:'杜甫', dynasty:'唐', content:'岱宗夫如何？齐鲁青未了。\n造化钟神秀，阴阳割昏晓。\n荡胸生曾云，决眦入归鸟。\n会当凌绝顶，一览众山小。' },
+  { title:'旅夜书怀', author:'杜甫', dynasty:'唐', content:'细草微风岸，危樯独夜舟。\n星垂平野阔，月涌大江流。\n名岂文章著，官应老病休。\n飘飘何所似，天地一沙鸥。' },
+  { title:'静夜思', author:'李白', dynasty:'唐', content:'床前明月光，疑是地上霜。\n举头望明月，低头思故乡。' },
+  { title:'望庐山瀑布', author:'李白', dynasty:'唐', content:'日照香炉生紫烟，遥看瀑布挂前川。\n飞流直下三千尺，疑是银河落九天。' },
+  { title:'赠汪伦', author:'李白', dynasty:'唐', content:'李白乘舟将欲行，忽闻岸上踏歌声。\n桃花潭水深千尺，不及汪伦送我情。' },
+  { title:'送孟浩然之广陵', author:'李白', dynasty:'唐', content:'故人西辞黄鹤楼，烟花三月下扬州。\n孤帆远影碧空尽，唯见长江天际流。' },
+  { title:'早发白帝城', author:'李白', dynasty:'唐', content:'朝辞白帝彩云间，千里江陵一日还。\n两岸猿声啼不住，轻舟已过万重山。' },
+  { title:'独坐敬亭山', author:'李白', dynasty:'唐', content:'众鸟高飞尽，孤云独去闲。\n相看两不厌，只有敬亭山。' },
+  { title:'将进酒', author:'李白', dynasty:'唐', content:'君不见黄河之水天上来，奔流到海不复回。\n君不见高堂明镜悲白发，朝如青丝暮成雪。\n人生得意须尽欢，莫使金樽空对月。\n天生我材必有用，千金散尽还复来。\n烹羊宰牛且为乐，会须一饮三百杯。\n岑夫子，丹丘生，将进酒，杯莫停。\n与君歌一曲，请君为我倾耳听。\n钟鼓馔玉不足贵，但愿长醉不愿醒。\n古来圣贤皆寂寞，惟有饮者留其名。\n陈王昔时宴平乐，斗酒十千恣欢谑。\n主人何为言少钱，径须沽取对君酌。\n五花马，千金裘，呼儿将出换美酒，与尔同销万古愁。' },
+  { title:'行路难', author:'李白', dynasty:'唐', content:'金樽清酒斗十千，玉盘珍羞直万钱。\n停杯投箸不能食，拔剑四顾心茫然。\n欲渡黄河冰塞川，将登太行雪满山。\n闲来垂钓碧溪上，忽复乘舟梦日边。\n行路难，行路难，多歧路，今安在？\n长风破浪会有时，直挂云帆济沧海。' },
+  { title:'黄鹤楼送孟浩然之广陵', author:'李白', dynasty:'唐', content:'故人西辞黄鹤楼，烟花三月下扬州。\n孤帆远影碧空尽，唯见长江天际流。' },
+  { title:'关山月', author:'李白', dynasty:'唐', content:'明月出天山，苍茫云海间。\n长风几万里，吹度玉门关。\n汉下白登道，胡窥青海湾。\n由来征战地，不见有人还。\n戍客望边邑，思归多苦颜。\n高楼当此夜，叹息未应闲。' },
+  { title:'送友人', author:'李白', dynasty:'唐', content:'青山横北郭，白水绕东城。\n此地一为别，孤蓬万里征。\n浮云游子意，落日故人情。\n挥手自兹去，萧萧班马鸣。' },
+  { title:'登金陵凤凰台', author:'李白', dynasty:'唐', content:'凤凰台上凤凰游，凤去台空江自流。\n吴宫花草埋幽径，晋代衣冠成古丘。\n三山半落青天外，二水中分白鹭洲。\n总为浮云能蔽日，长安不见使人愁。' },
+  { title:'月下独酌', author:'李白', dynasty:'唐', content:'花间一壶酒，独酌无相亲。\n举杯邀明月，对影成三人。\n月既不解饮，影徒随我身。\n暂伴月将影，行乐须及春。\n我歌月徘徊，我舞影零乱。\n醒时同交欢，醉后各分散。\n永结无情游，相期邈云汉。' },
+  { title:'金陵酒肆留别', author:'李白', dynasty:'唐', content:'风吹柳花满店香，吴姬压酒唤客尝。\n金陵子弟来相送，欲行不行各尽觞。\n请君试问东流水，别意与之谁短长。' },
+  { title:'宣州谢朓楼饯别校书叔云', author:'李白', dynasty:'唐', content:'弃我去者，昨日之日不可留。\n乱我心者，今日之日多烦忧。\n长风万里送秋雁，对此可以酣高楼。\n蓬莱文章建安骨，中间小谢又清发。\n俱怀逸兴壮思飞，欲上青天览明月。\n抽刀断水水更流，举杯消愁愁更愁。\n人生在世不称意，明朝散发弄扁舟。' },
+  { title:'夜泊牛渚怀古', author:'李白', dynasty:'唐', content:'牛渚西江夜，青天无片云。\n登舟望秋月，空忆谢将军。\n余亦能高咏，斯人不可闻。\n明朝挂帆席，枫叶落纷纷。' },
+  { title:'赤壁', author:'杜牧', dynasty:'唐', content:'折戟沉沙铁未销，自将磨洗认前朝。\n东风不与周郎便，铜雀春深锁二乔。' },
+  { title:'乌衣巷', author:'刘禹锡', dynasty:'唐', content:'朱雀桥边野草花，乌衣巷口夕阳斜。\n旧时王谢堂前燕，飞入寻常百姓家。' },
+  { title:'凉州词', author:'王翰', dynasty:'唐', content:'葡萄美酒夜光杯，欲饮琵琶马上催。\n醉卧沙场君莫笑，古来征战几人回。' },
+  { title:'出塞', author:'王之涣', dynasty:'唐', content:'黄河远上白云间，一片孤城万仞山。\n羌笛何须怨杨柳，春风不度玉门关。' },
+  { title:'送杜少府之任蜀州', author:'王勃', dynasty:'唐', content:'城阙辅三秦，风烟望五津。\n与君离别意，同是宦游人。\n海内存知己，天涯若比邻。\n无为在歧路，儿女共沾巾。' },
+  { title:'滕王阁诗', author:'王勃', dynasty:'唐', content:'滕王高阁临江渚，佩玉鸣鸾罢歌舞。\n画栋朝飞南浦云，珠帘暮卷西山雨。\n闲云潭影日悠悠，物换星移几度秋。\n阁中帝子今何在？槛外长江空自流。' },
+  { title:'回乡偶书', author:'贺知章', dynasty:'唐', content:'少小离家老大回，乡音无改鬓毛衰。\n儿童相见不相识，笑问客从何处来。' },
+  { title:'咏柳', author:'贺知章', dynasty:'唐', content:'碧玉妆成一树高，万条垂下绿丝绦。\n不知细叶谁裁出，二月春风似剪刀。' },
+  { title:'题都城南庄', author:'崔护', dynasty:'唐', content:'去年今日此门中，人面桃花相映红。\n人面不知何处去，桃花依旧笑春风。' },
+  { title:'次北固山下', author:'王湾', dynasty:'唐', content:'客路青山外，行舟绿水前。\n潮平两岸阔，风正一帆悬。\n海日生残夜，江春入旧年。\n乡书何处达，归雁洛阳边。' },
+  { title:'黄鹤楼', author:'崔颢', dynasty:'唐', content:'昔人已乘黄鹤去，此地空余黄鹤楼。\n黄鹤一去不复返，白云千载空悠悠。\n晴川历历汉阳树，芳草萋萋鹦鹉洲。\n日暮乡关何处是，烟波江上使人愁。' },
+  { title:'终南望余雪', author:'祖咏', dynasty:'唐', content:'终南阴岭秀，积雪浮云端。\n林表明霁色，城中增暮寒。' },
+  { title:'过故人庄', author:'孟浩然', dynasty:'唐', content:'故人具鸡黍，邀我至田家。\n绿树村边合，青山郭外斜。\n开轩面场圃，把酒话桑麻。\n待到重阳日，还来就菊花。' },
+  { title:'宿建德江', author:'孟浩然', dynasty:'唐', content:'移舟泊烟渚，日暮客愁新。\n野旷天低树，江清月近人。' },
+  { title:'山居秋暝', author:'王维', dynasty:'唐', content:'空山新雨后，天气晚来秋。\n明月松间照，清泉石上流。\n竹喧归浣女，莲动下渔舟。\n随意春芳歇，王孙自可留。' },
+  { title:'使至塞上', author:'王维', dynasty:'唐', content:'单车欲问边，属国过居延。\n征蓬出汉塞，归雁入胡天。\n大漠孤烟直，长河落日圆。\n萧关逢候骑，都护在燕然。' },
+  { title:'相思', author:'王维', dynasty:'唐', content:'红豆生南国，春来发几枝。\n愿君多采撷，此物最相思。' },
+  { title:'九月九日忆山东兄弟', author:'王维', dynasty:'唐', content:'独在异乡为异客，每逢佳节倍思亲。\n遥知兄弟登高处，遍插茱萸少一人。' },
+  { title:'送元二使安西', author:'王维', dynasty:'唐', content:'渭城朝雨浥轻尘，客舍青青柳色新。\n劝君更尽一杯酒，西出阳关无故人。' },
+  { title:'竹里馆', author:'王维', dynasty:'唐', content:'独坐幽篁里，弹琴复长啸。\n深林人不知，明月来相照。' },
+  { title:'鸟鸣涧', author:'王维', dynasty:'唐', content:'人闲桂花落，夜静春山空。\n月出惊山鸟，时鸣春涧中。' },
+  { title:'鹿柴', author:'王维', dynasty:'唐', content:'空山不见人，但闻人语响。\n返景入深林，复照青苔上。' },
+  { title:'杂诗', author:'王维', dynasty:'唐', content:'君自故乡来，应知故乡事。\n来日绮窗前，寒梅著花未。' },
+  { title:'渭城曲', author:'王维', dynasty:'唐', content:'渭城朝雨浥轻尘，客舍青青柳色新。\n劝君更尽一杯酒，西出阳关无故人。' },
+  { title:'钱塘湖春行', author:'白居易', dynasty:'唐', content:'孤山寺北贾亭西，水面初平云脚低。\n几处早莺争暖树，谁家新燕啄春泥。\n乱花渐欲迷人眼，浅草才能没马蹄。\n最爱湖东行不足，绿杨阴里白沙堤。' },
+  { title:'忆江南', author:'白居易', dynasty:'唐', content:'江南好，风景旧曾谙。\n日出江花红胜火，春来江水绿如蓝。\n能不忆江南？' },
+  { title:'暮江吟', author:'白居易', dynasty:'唐', content:'一道残阳铺水中，半江瑟瑟半江红。\n可怜九月初三夜，露似真珠月似弓。' },
+  { title:'大林寺桃花', author:'白居易', dynasty:'唐', content:'人间四月芳菲尽，山寺桃花始盛开。\n长恨春归无觅处，不知转入此中来。' },
+  { title:'问刘十九', author:'白居易', dynasty:'唐', content:'绿蚁新醅酒，红泥小火炉。\n晚来天欲雪，能饮一杯无。' },
+  { title:'琵琶行（节选）', author:'白居易', dynasty:'唐', content:'浔阳江头夜送客，枫叶荻花秋瑟瑟。\n主人下马客在船，举酒欲饮无管弦。\n醉不成欢惨将别，别时茫茫江浸月。\n忽闻水上琵琶声，主人忘归客不发。\n千呼万唤始出来，犹抱琵琶半遮面。\n转轴拨弦三两声，未成曲调先有情。\n大弦嘈嘈如急雨，小弦切切如私语。\n嘈嘈切切错杂弹，大珠小珠落玉盘。\n别有幽愁暗恨生，此时无声胜有声。\n同是天涯沦落人，相逢何必曾相识。' },
+  { title:'三衢道中', author:'曾几', dynasty:'宋', content:'梅子黄时日日晴，小溪泛尽却山行。\n绿阴不减来时路，添得黄鹂四五声。' },
+  { title:'雪梅·其一', author:'卢梅坡', dynasty:'宋', content:'梅雪争春未肯降，骚人搁笔费评章。\n梅须逊雪三分白，雪却输梅一段香。' },
+  { title:'绝句', author:'僧志南', dynasty:'宋', content:'古木阴中系短篷，杖藜扶我过桥东。\n沾衣欲湿杏花雨，吹面不寒杨柳风。' },
+  { title:'题壁', author:'无名氏', dynasty:'宋', content:'一团茅草乱蓬蓬，蓦地烧天蓦地空。\n争似满炉煨榾柮，漫腾腾地暖烘烘。' },
+  { title:'蚕妇', author:'张俞', dynasty:'宋', content:'昨日入城市，归来泪满巾。\n遍身罗绮者，不是养蚕人。' },
+  { title:'村晚', author:'雷震', dynasty:'宋', content:'草满池塘水满陂，山衔落日浸寒漪。\n牧童归去横牛背，短笛无腔信口吹。' },
+  { title:'乡村四月', author:'翁卷', dynasty:'宋', content:'绿遍山原白满川，子规声里雨如烟。\n乡村四月闲人少，才了蚕桑又插田。' },
+  { title:'约客', author:'赵师秀', dynasty:'宋', content:'黄梅时节家家雨，青草池塘处处蛙。\n有约不来过夜半，闲敲棋子落灯花。' },
+  { title:'寒夜', author:'杜耒', dynasty:'宋', content:'寒夜客来茶当酒，竹炉汤沸火初红。\n寻常一样窗前月，才有梅花便不同。' },
+  { title:'夜书所见', author:'叶绍翁', dynasty:'宋', content:'萧萧梧叶送寒声，江上秋风动客情。\n知有儿童挑促织，夜深篱落一灯明。' },
+  { title:'淮村兵后', author:'戴复古', dynasty:'宋', content:'小桃无主自开花，烟草茫茫带晓鸦。\n几处败垣围故井，向来一一是人家。' },
+  { title:'湖上', author:'徐元杰', dynasty:'宋', content:'花开红树乱莺啼，草长平湖白鹭飞。\n风日晴和人意好，夕阳箫鼓几船归。' },
+  { title:'立春偶成', author:'张栻', dynasty:'宋', content:'律回岁晚冰霜少，春到人间草木知。\n便觉眼前生意满，东风吹水绿参差。' },
+  { title:'夏夜追凉', author:'杨万里', dynasty:'宋', content:'夜热依然午热同，开门小立月明中。\n竹深树密虫鸣处，时有微凉不是风。' },
+  { title:'秋夜将晓出篱门迎凉有感', author:'陆游', dynasty:'宋', content:'三万里河东入海，五千仞岳上摩天。\n遗民泪尽胡尘里，南望王师又一年。' },
+  { title:'示儿', author:'陆游', dynasty:'宋', content:'死去元知万事空，但悲不见九州同。\n王师北定中原日，家祭无忘告乃翁。' },
+  { title:'冬夜读书示子聿', author:'陆游', dynasty:'宋', content:'古人学问无遗力，少壮工夫老始成。\n纸上得来终觉浅，绝知此事要躬行。' },
+  { title:'游山西村', author:'陆游', dynasty:'宋', content:'莫笑农家腊酒浑，丰年留客足鸡豚。\n山重水复疑无路，柳暗花明又一村。\n箫鼓追随春社近，衣冠简朴古风存。\n从今若许闲乘月，拄杖无时夜叩门。' },
+  { title:'临安春雨初霁', author:'陆游', dynasty:'宋', content:'世味年来薄似纱，谁令骑马客京华。\n小楼一夜听春雨，深巷明朝卖杏花。\n矮纸斜行闲作草，晴窗细乳戏分茶。\n素衣莫起风尘叹，犹及清明可到家。' },
+  { title:'书愤', author:'陆游', dynasty:'宋', content:'早岁那知世事艰，中原北望气如山。\n楼船夜雪瓜洲渡，铁马秋风大散关。\n塞上长城空自许，镜中衰鬓已先斑。\n出师一表真名世，千载谁堪伯仲间。' },
+  { title:'卜算子·咏梅', author:'陆游', dynasty:'宋', content:'驿外断桥边，寂寞开无主。\n已是黄昏独自愁，更著风和雨。\n无意苦争春，一任群芳妒。\n零落成泥碾作尘，只有香如故。' },
+  { title:'钗头凤', author:'陆游', dynasty:'宋', content:'红酥手，黄縢酒，满城春色宫墙柳。\n东风恶，欢情薄。一怀愁绪，几年离索。\n错、错、错。\n春如旧，人空瘦，泪痕红浥鲛绡透。\n桃花落，闲池阁。山盟虽在，锦书难托。\n莫、莫、莫。' },
+  { title:'题临安邸', author:'林升', dynasty:'宋', content:'山外青山楼外楼，西湖歌舞几时休。\n暖风熏得游人醉，直把杭州作汴州。' },
+  { title:'过零丁洋', author:'文天祥', dynasty:'宋', content:'辛苦遭逢起一经，干戈寥落四周星。\n山河破碎风飘絮，身世浮沉雨打萍。\n惶恐滩头说惶恐，零丁洋里叹零丁。\n人生自古谁无死，留取丹心照汗青。' },
+  { title:'正气歌', author:'文天祥', dynasty:'宋', content:'天地有正气，杂然赋流形。\n下则为河岳，上则为日星。\n于人曰浩然，沛乎塞苍冥。\n皇路当清夷，含和吐明庭。\n时穷节乃见，一一垂丹青。\n在齐太史简，在晋董狐笔。\n在秦张良椎，在汉苏武节。\n为严将军头，为嵇侍中血。\n为张睢阳齿，为颜常山舌。\n或为辽东帽，清操厉冰雪。\n或为出师表，鬼神泣壮烈。\n或为渡江楫，慷慨吞胡羯。\n或为击贼笏，逆竖头破裂。\n是气所磅礴，凛烈万古存。\n当其贯日月，生死安足论。' },
+  { title:'石灰吟', author:'于谦', dynasty:'明', content:'千锤万凿出深山，烈火焚烧若等闲。\n粉骨碎身浑不怕，要留清白在人间。' },
+  { title:'竹石', author:'郑燮', dynasty:'清', content:'咬定青山不放松，立根原在破岩中。\n千磨万击还坚劲，任尔东西南北风。' },
+  { title:'己亥杂诗', author:'龚自珍', dynasty:'清', content:'九州生气恃风雷，万马齐喑究可哀。\n我劝天公重抖擞，不拘一格降人才。' },
+  { title:'村居', author:'高鼎', dynasty:'清', content:'草长莺飞二月天，拂堤杨柳醉春烟。\n儿童散学归来早，忙趁东风放纸鸢。' },
+  { title:'所见', author:'袁枚', dynasty:'清', content:'牧童骑黄牛，歌声振林樾。\n意欲捕鸣蝉，忽然闭口立。' },
+  { title:'舟夜书所见', author:'查慎行', dynasty:'清', content:'月黑见渔灯，孤光一点萤。\n微微风簇浪，散作满河星。' },
+  { title:'长相思', author:'纳兰性德', dynasty:'清', content:'山一程，水一程，身向榆关那畔行，夜深千帐灯。\n风一更，雪一更，聒碎乡心梦不成，故园无此声。' },
+  { title:'木兰词', author:'纳兰性德', dynasty:'清', content:'人生若只如初见，何事秋风悲画扇。\n等闲变却故人心，却道故人心易变。\n骊山语罢清宵半，泪雨霖铃终不怨。\n何如薄幸锦衣郎，比翼连枝当日愿。' },
+  { title:'苔', author:'袁枚', dynasty:'清', content:'白日不到处，青春恰自来。\n苔花如米小，也学牡丹开。' },
+  { title:'论诗', author:'赵翼', dynasty:'清', content:'李杜诗篇万口传，至今已觉不新鲜。\n江山代有才人出，各领风骚数百年。' },
+  { title:'明日歌', author:'钱福', dynasty:'明', content:'明日复明日，明日何其多。\n我生待明日，万事成蹉跎。\n世人若被明日累，春去秋来老将至。\n朝看水东流，暮看日西坠。\n百年明日能几何？请君听我明日歌。' },
+  { title:'临江仙·滚滚长江东逝水', author:'杨慎', dynasty:'明', content:'滚滚长江东逝水，浪花淘尽英雄。\n是非成败转头空。\n青山依旧在，几度夕阳红。\n白发渔樵江渚上，惯看秋月春风。\n一壶浊酒喜相逢。\n古今多少事，都付笑谈中。' },
+  { title:'桃花庵歌', author:'唐寅', dynasty:'明', content:'桃花坞里桃花庵，桃花庵下桃花仙。\n桃花仙人种桃树，又摘桃花换酒钱。\n酒醒只在花前坐，酒醉还来花下眠。\n半醒半醉日复日，花落花开年复年。\n但愿老死花酒间，不愿鞠躬车马前。\n车尘马足富者趣，酒盏花枝贫者缘。\n若将富贵比贫贱，一在平地一在天。\n若将贫贱比车马，他得驱驰我得闲。\n别人笑我太疯癫，我笑他人看不穿。\n不见五陵豪杰墓，无花无酒锄作田。' },
+  { title:'天净沙·秋思', author:'马致远', dynasty:'元', content:'枯藤老树昏鸦，小桥流水人家，古道西风瘦马。\n夕阳西下，断肠人在天涯。' },
+  { title:'山坡羊·潼关怀古', author:'张养浩', dynasty:'元', content:'峰峦如聚，波涛如怒，山河表里潼关路。\n望西都，意踌躇。\n伤心秦汉经行处，宫阙万间都做了土。\n兴，百姓苦；亡，百姓苦。' },
+  { title:'墨梅', author:'王冕', dynasty:'元', content:'吾家洗砚池头树，朵朵花开淡墨痕。\n不要人夸好颜色，只留清气满乾坤。' },
+  { title:'就义诗', author:'杨继盛', dynasty:'明', content:'浩气还太虚，丹心照千古。\n生平未报国，留作忠魂补。' },
+  { title:'沁园春·雪', author:'毛泽东', dynasty:'近现代', content:'北国风光，千里冰封，万里雪飘。\n望长城内外，惟余莽莽；大河上下，顿失滔滔。\n山舞银蛇，原驰蜡象，欲与天公试比高。\n须晴日，看红装素裹，分外妖娆。\n江山如此多娇，引无数英雄竞折腰。\n惜秦皇汉武，略输文采；唐宗宋祖，稍逊风骚。\n一代天骄，成吉思汗，只识弯弓射大雕。\n俱往矣，数风流人物，还看今朝。' },
+  { title:'沁园春·长沙', author:'毛泽东', dynasty:'近现代', content:'独立寒秋，湘江北去，橘子洲头。\n看万山红遍，层林尽染；漫江碧透，百舸争流。\n鹰击长空，鱼翔浅底，万类霜天竞自由。\n怅寥廓，问苍茫大地，谁主沉浮？\n携来百侣曾游，忆往昔峥嵘岁月稠。\n恰同学少年，风华正茂；书生意气，挥斥方遒。\n指点江山，激扬文字，粪土当年万户侯。\n曾记否，到中流击水，浪遏飞舟？' },
+  { title:'再别康桥', author:'徐志摩', dynasty:'近现代', content:'轻轻的我走了，正如我轻轻的来。\n我轻轻的招手，作别西天的云彩。\n那河畔的金柳，是夕阳中的新娘。\n波光里的艳影，在我的心头荡漾。\n软泥上的青荇，油油的在水底招摇。\n在康河的柔波里，我甘心做一条水草。\n那榆荫下的一潭，不是清泉，是天上虹。\n揉碎在浮藻间，沉淀着彩虹似的梦。\n寻梦？撑一支长篙，向青草更青处漫溯。\n满载一船星辉，在星辉斑斓里放歌。\n但我不能放歌，悄悄是别离的笙箫。\n夏虫也为我沉默，沉默是今晚的康桥。\n悄悄的我走了，正如我悄悄的来。\n我挥一挥衣袖，不带走一片云彩。' },
+  { title:'断章', author:'卞之琳', dynasty:'近现代', content:'你站在桥上看风景，\n看风景的人在楼上看你。\n明月装饰了你的窗子，\n你装饰了别人的梦。' },
+  { title:'乡愁', author:'余光中', dynasty:'近现代', content:'小时候，乡愁是一枚小小的邮票，\n我在这头，母亲在那头。\n长大后，乡愁是一张窄窄的船票，\n我在这头，新娘在那头。\n后来啊，乡愁是一方矮矮的坟墓，\n我在外头，母亲在里头。\n而现在，乡愁是一湾浅浅的海峡，\n我在这头，大陆在那头。' },
+  { title:'面朝大海，春暖花开', author:'海子', dynasty:'近现代', content:'从明天起，做一个幸福的人\n喂马，劈柴，周游世界\n从明天起，关心粮食和蔬菜\n我有一所房子，面朝大海，春暖花开\n从明天起，和每一个亲人通信\n告诉他们我的幸福\n那幸福的闪电告诉我的\n我将告诉每一个人\n给每一条河每一座山取一个温暖的名字\n陌生人，我也为你祝福\n愿你有一个灿烂的前程\n愿你有情人终成眷属\n愿你在尘世获得幸福\n我只愿面朝大海，春暖花开。' },
+  { title:'错误', author:'郑愁予', dynasty:'近现代', content:'我打江南走过\n那等在季节里的容颜如莲花的开落\n东风不来，三月的柳絮不飞\n你的心如小小的寂寞的城\n恰若青石的街道向晚\n跫音不响，三月的春帷不揭\n你的心是小小的窗扉紧掩\n我达达的马蹄是美丽的错误\n我不是归人，是个过客。' },
+  { title:'一棵开花的树', author:'席慕容', dynasty:'近现代', content:'如何让你遇见我\n在我最美丽的时刻\n为这\n我已在佛前求了五百年\n求佛让我们结一段尘缘\n佛于是把我化作一棵树\n长在你必经的路旁\n阳光下\n慎重地开满了花\n朵朵都是我前世的盼望\n当你走近\n请你细听\n那颤抖的叶\n是我等待的热情\n而当你终于无视地走过\n在你身后落了一地的\n朋友啊\n那不是花瓣\n是我凋零的心。' },
+  { title:'回答', author:'北岛', dynasty:'近现代', content:'卑鄙是卑鄙者的通行证，\n高尚是高尚者的墓志铭。\n看吧，在那镀金的天空中，\n飘满了死者弯曲的倒影。\n冰川纪过去了，\n为什么到处都是冰凌？\n好望角发现了，\n为什么死海里千帆相竞？\n我来到这个世界上，\n只带着纸、绳索和身影。\n为了在审判之前，\n宣读那些被判决的声音：\n告诉你吧，世界，\n我——不——相——信！' },
+
+  // ======== 扩编七 — 最终补遗：唐诗·宋词·元曲·明清单 ========
+  { title:'春思', author:'李白', dynasty:'唐', content:'燕草如碧丝，秦桑低绿枝。\n当君怀归日，是妾断肠时。\n春风不相识，何事入罗帏？' },
+  { title:'庐山谣寄卢侍御虚舟', author:'李白', dynasty:'唐', content:'我本楚狂人，凤歌笑孔丘。\n手持绿玉杖，朝别黄鹤楼。\n五岳寻仙不辞远，一生好入名山游。\n庐山秀出南斗傍，屏风九叠云锦张。\n影落明湖青黛光，金阙前开二峰长。\n银河倒挂三石梁，香炉瀑布遥相望。\n回崖沓嶂凌苍苍，翠影红霞映朝日。\n鸟飞不到吴天长，登高壮观天地间。\n大江茫茫去不还，黄云万里动风色。\n白波九道流雪山，好为庐山谣。\n兴因庐山发，闲窥石镜清我心。\n谢公行处苍苔没，早服还丹无世情。\n琴心三叠道初成，遥见仙人彩云里。\n手把芙蓉朝玉京，先期汗漫九垓上。\n愿接卢敖游太清。' },
+  { title:'对酒', author:'白居易', dynasty:'唐', content:'蜗牛角上争何事？石火光中寄此身。\n随富随贫且欢乐，不开口笑是痴人。' },
+  { title:'惜牡丹花', author:'白居易', dynasty:'唐', content:'惆怅阶前红牡丹，晚来唯有两枝残。\n明朝风起应吹尽，夜惜衰红把火看。' },
+  { title:'白云泉', author:'白居易', dynasty:'唐', content:'天平山上白云泉，云自无心水自闲。\n何必奔冲山下去，更添波浪向人间。' },
+  { title:'与梦得沽酒闲饮且约后期', author:'白居易', dynasty:'唐', content:'少时犹不忧生计，老后谁能惜酒钱？\n共把十千沽一斗，相看七十欠三年。\n闲征雅令穷经史，醉听清吟胜管弦。\n更待菊黄家酝熟，共君一醉一陶然。' },
+  { title:'览卢子蒙旧诗多与微之唱和感今伤昔', author:'白居易', dynasty:'唐', content:'昔闻元九咏君诗，恨与卢君相识迟。\n今日逢君开旧卷，卷中多道赠微之。\n相看泪眼情难说，别有伤心事岂知。\n闻道咸阳坟上树，已抽三丈白杨枝。' },
+  { title:'与元九书', author:'白居易', dynasty:'唐', content:'感人心者，莫先乎情，莫始乎言，莫切乎声，莫深乎义。\n诗者，根情，苗言，华声，实义。' },
+  { title:'春雪', author:'韩愈', dynasty:'唐', content:'新年都未有芳华，二月初惊见草芽。\n白雪却嫌春色晚，故穿庭树作飞花。' },
+  { title:'晚春', author:'韩愈', dynasty:'唐', content:'草树知春不久归，百般红紫斗芳菲。\n杨花榆荚无才思，惟解漫天作雪飞。' },
+  { title:'同水部张员外籍曲江春游寄白二十二舍人', author:'韩愈', dynasty:'唐', content:'漠漠轻阴晚自开，青天白日映楼台。\n曲江水满花千树，有底忙时不肯来。' },
+  { title:'题木居士', author:'韩愈', dynasty:'唐', content:'火透波穿不计春，根如头面干如身。\n偶然题作木居士，便有无穷求福人。' },
+  { title:'柳州二月榕叶落尽偶题', author:'柳宗元', dynasty:'唐', content:'宦情羁思共凄凄，春半如秋意转迷。\n山城过雨百花尽，榕叶满庭莺乱啼。' },
+  { title:'别舍弟宗一', author:'柳宗元', dynasty:'唐', content:'零落残魂倍黯然，双垂别泪越江边。\n一身去国六千里，万死投荒十二年。\n桂岭瘴来云似墨，洞庭春尽水如天。\n欲知此后相思梦，长在荆门郢树烟。' },
+  { title:'梦天', author:'李贺', dynasty:'唐', content:'老兔寒蟾泣天色，云楼半开壁斜白。\n玉轮轧露湿团光，鸾珮相逢桂香陌。\n黄尘清水三山下，更变千年如走马。\n遥望齐州九点烟，一泓海水杯中泻。' },
+  { title:'金铜仙人辞汉歌', author:'李贺', dynasty:'唐', content:'茂陵刘郎秋风客，夜闻马嘶晓无迹。\n画栏桂树悬秋香，三十六宫土花碧。\n魏官牵车指千里，东关酸风射眸子。\n空将汉月出宫门，忆君清泪如铅水。\n衰兰送客咸阳道，天若有情天亦老。\n携盘独出月荒凉，渭城已远波声小。' },
+  { title:'致酒行', author:'李贺', dynasty:'唐', content:'零落栖迟一杯酒，主人奉觞客长寿。\n主父西游困不归，家人折断门前柳。\n吾闻马周昔作新丰客，天荒地老无人识。\n空将笺上两行书，直犯龙颜请恩泽。\n我有迷魂招不得，雄鸡一声天下白。\n少年心事当拏云，谁念幽寒坐呜呃。' },
+  { title:'苏小小墓', author:'李贺', dynasty:'唐', content:'幽兰露，如啼眼。\n无物结同心，烟花不堪剪。\n草如茵，松如盖。\n风为裳，水为珮。\n油壁车，夕相待。\n冷翠烛，劳光彩。\n西陵下，风吹雨。' },
+  { title:'将进酒', author:'李贺', dynasty:'唐', content:'琉璃钟，琥珀浓，小槽酒滴真珠红。\n烹龙炮凤玉脂泣，罗帏绣幕围香风。\n吹龙笛，击鼍鼓；皓齿歌，细腰舞。\n况是青春日将暮，桃花乱落如红雨。\n劝君终日酩酊醉，酒不到刘伶坟上土。' },
+  { title:'遣悲怀·其一', author:'元稹', dynasty:'唐', content:'谢公最小偏怜女，自嫁黔娄百事乖。\n顾我无衣搜荩箧，泥他沽酒拔金钗。\n野蔬充膳甘长藿，落叶添薪仰古槐。\n今日俸钱过十万，与君营奠复营斋。' },
+  { title:'菊花', author:'元稹', dynasty:'唐', content:'秋丛绕舍似陶家，遍绕篱边日渐斜。\n不是花中偏爱菊，此花开尽更无花。' },
+  { title:'晚晴', author:'李商隐', dynasty:'唐', content:'深居俯夹城，春去夏犹清。\n天意怜幽草，人间重晚晴。\n并添高阁迥，微注小窗明。\n越鸟巢干后，归飞体更轻。' },
+  { title:'安定城楼', author:'李商隐', dynasty:'唐', content:'迢递高城百尺楼，绿杨枝外尽汀洲。\n贾生年少虚垂涕，王粲春来更远游。\n永忆江湖归白发，欲回天地入扁舟。\n不知腐鼠成滋味，猜意鹓雏竟未休。' },
+  { title:'流莺', author:'李商隐', dynasty:'唐', content:'流莺漂荡复参差，度陌临流不自持。\n巧啭岂能无本意？良辰未必有佳期。\n风朝露夜阴晴里，万户千门开闭时。\n曾苦伤春不忍听，凤城何处有花枝。' },
+  { title:'七月二十九日崇让宅宴作', author:'李商隐', dynasty:'唐', content:'露如微霰下前池，风过回塘万竹悲。\n浮世本来多聚散，红蕖何事亦离披？\n悠扬归梦惟灯见，濩落生涯独酒知。\n岂到白头长只尔，嵩阳松雪有心期。' },
+  { title:'蜂', author:'罗隐', dynasty:'唐', content:'不论平地与山尖，无限风光尽被占。\n采得百花成蜜后，为谁辛苦为谁甜？' },
+  { title:'鹦鹉', author:'罗隐', dynasty:'唐', content:'莫恨雕笼翠羽残，江南地暖陇西寒。\n劝君不用分明语，语得分明出转难。' },
+  { title:'雪', author:'罗隐', dynasty:'唐', content:'尽道丰年瑞，丰年事若何。\n长安有贫者，为瑞不宜多。' },
+  { title:'台城', author:'韦庄', dynasty:'唐', content:'江雨霏霏江草齐，六朝如梦鸟空啼。\n无情最是台城柳，依旧烟笼十里堤。' },
+  { title:'送日本国僧敬龙归', author:'韦庄', dynasty:'唐', content:'扶桑已在渺茫中，家在扶桑东更东。\n此去与师谁共到，一船明月一帆风。' },
+  { title:'古离别', author:'韦庄', dynasty:'唐', content:'晴烟漠漠柳毵毵，不那离情酒半酣。\n更把玉鞭云外指，断肠春色在江南。' },
+  { title:'小松', author:'杜荀鹤', dynasty:'唐', content:'自小刺头深草里，而今渐觉出蓬蒿。\n时人不识凌云木，直待凌云始道高。' },
+  { title:'山中寡妇', author:'杜荀鹤', dynasty:'唐', content:'夫因兵死守蓬茅，麻苎衣衫鬓发焦。\n桑柘废来犹纳税，田园荒后尚征苗。\n时挑野菜和根煮，旋斫生柴带叶烧。\n任是深山更深处，也应无计避征徭。' },
+  { title:'除夜', author:'崔涂', dynasty:'唐', content:'迢递三巴路，羁危万里身。\n残雪和雁断，新雪带潮春。\n那堪正飘泊，明日岁华新。' },
+  { title:'孤雁', author:'崔涂', dynasty:'唐', content:'几行归塞尽，念尔独何之。\n暮雨相呼失，寒塘欲下迟。\n渚云低暗度，关月冷相随。\n未必逢矰缴，孤飞自可疑。' },
+  { title:'贫女', author:'秦韬玉', dynasty:'唐', content:'蓬门未识绮罗香，拟托良媒益自伤。\n谁爱风流高格调，共怜时世俭梳妆。\n敢将十指夸针巧，不把双眉斗画长。\n苦恨年年压金线，为他人作嫁衣裳。' },
+  { title:'春怨', author:'金昌绪', dynasty:'唐', content:'打起黄莺儿，莫教枝上啼。\n啼时惊妾梦，不得到辽西。' },
+  { title:'鹧鸪天·送人', author:'辛弃疾', dynasty:'宋', content:'唱彻阳关泪未干，功名余事且加餐。\n浮天水送无穷树，带雨云埋一半山。\n今古恨，几千般，只应离合是悲欢？\n江头未是风波恶，别有人间行路难。' },
+  { title:'太常引·建康中秋夜为吕叔潜赋', author:'辛弃疾', dynasty:'宋', content:'一轮秋影转金波，飞镜又重磨。\n把酒问姮娥：被白发、欺人奈何？\n乘风好去，长空万里，直下看山河。\n斫去桂婆娑，人道是、清光更多。' },
+  { title:'贺新郎', author:'辛弃疾', dynasty:'宋', content:'甚矣吾衰矣。\n怅平生、交游零落，只今余几！\n白发空垂三千丈，一笑人间万事。\n问何物、能令公喜？\n我见青山多妩媚，料青山见我应如是。\n情与貌，略相似。\n一尊搔首东窗里。\n想渊明、停云诗就，此时风味。\n江左沉酣求名者，岂识浊醪妙理。\n回首叫、云飞风起。\n不恨古人吾不见，恨古人不见吾狂耳。\n知我者，二三子。' },
+  { title:'念奴娇·书东流村壁', author:'辛弃疾', dynasty:'宋', content:'野棠花落，又匆匆过了，清明时节。\n刬地东风欺客梦，一枕云屏寒怯。\n曲岸持觞，垂杨系马，此地曾经别。\n楼空人去，旧游飞燕能说。' },
+  { title:'西江月·遣兴', author:'辛弃疾', dynasty:'宋', content:'醉里且贪欢笑，要愁那得工夫。\n近来始觉古人书，信著全无是处。\n昨夜松边醉倒，问松我醉何如。\n只疑松动要来扶，以手推松曰去。' },
+  { title:'南歌子·疏雨池塘见', author:'贺铸', dynasty:'宋', content:'疏雨池塘见，微风襟袖知。\n阴阴夏木啭黄鹂。\n何处飞来白鹭、立移时。\n易醉扶头酒，难逢敌手棋。\n日长偏与睡相宜。\n睡起芭蕉叶上、自题诗。' },
+  { title:'青玉案', author:'贺铸', dynasty:'宋', content:'凌波不过横塘路，但目送、芳尘去。\n锦瑟华年谁与度？\n月桥花院，琐窗朱户，只有春知处。\n飞云冉冉蘅皋暮，彩笔新题断肠句。\n试问闲情都几许？\n一川烟草，满城风絮，梅子黄时雨。' },
+  { title:'鹧鸪天·重过阊门万事非', author:'贺铸', dynasty:'宋', content:'重过阊门万事非，同来何事不同归？\n梧桐半死清霜后，头白鸳鸯失伴飞。\n原上草，露初晞。旧栖新垅两依依。\n空床卧听南窗雨，谁复挑灯夜补衣。' },
+  { title:'卜算子·我住长江头', author:'李之仪', dynasty:'宋', content:'我住长江头，君住长江尾。\n日日思君不见君，共饮长江水。\n此水几时休，此恨何时已。\n只愿君心似我心，定不负相思意。' },
+  { title:'摸鱼儿·东皋寓居', author:'晁补之', dynasty:'宋', content:'买陂塘、旋栽杨柳，依稀淮岸江浦。\n东皋嘉雨新痕涨，沙觜鹭来鸥聚。\n堪爱处，最好是、一川夜月光流渚。\n无人独舞。\n任翠幄张天，柔茵藉地，酒尽未能去。' },
+  { title:'瑞龙吟', author:'周邦彦', dynasty:'宋', content:'章台路，还见褪粉梅梢，试花桃树。\n愔愔坊陌人家，定巢燕子，归来旧处。\n黯凝伫，因念个人痴小，乍窥门户。\n侵晨浅约宫黄，障风映袖，盈盈笑语。\n前度刘郎重到，访邻寻里，同时歌舞。\n唯有旧家秋娘，声价如故。\n吟笺赋笔，犹记燕台句。\n知谁伴、名园露饮，东城闲步。\n事与孤鸿去。\n探春尽是，伤离意绪。\n官柳低金缕。\n归骑晚，纤纤池塘飞雨。\n断肠院落，一帘风絮。' },
+  { title:'玉楼春·春景', author:'宋祁', dynasty:'宋', content:'东城渐觉风光好，縠皱波纹迎客棹。\n绿杨烟外晓寒轻，红杏枝头春意闹。\n浮生长恨欢娱少，肯爱千金轻一笑。\n为君持酒劝斜阳，且向花间留晚照。' },
+  { title:'破阵子·春景', author:'晏殊', dynasty:'宋', content:'燕子来时新社，梨花落后清明。\n池上碧苔三四点，叶底黄鹂一两声，日长飞絮轻。\n巧笑东邻女伴，采桑径里逢迎。\n疑怪昨宵春梦好，元是今朝斗草赢，笑从双脸生。' },
+  { title:'渔家傲', author:'王安石', dynasty:'宋', content:'平岸小桥千嶂抱，柔蓝一水萦花草。\n茅屋数间窗窈窕。\n尘不到，时时自有春风扫。\n午枕觉来闻语鸟，欹眠似听朝鸡早。\n忽忆故人今总老。\n贪梦好，茫然忘了邯郸道。' },
+  { title:'清平乐·春晚', author:'王安国', dynasty:'宋', content:'留春不住，费尽莺儿语。\n满地残红宫锦污，昨夜南园风雨。\n小怜初上琵琶，晓来思绕天涯。\n不肯画堂朱户，春风自在杨花。' },
+  { title:'减字木兰花·竞渡', author:'黄裳', dynasty:'宋', content:'红旗高举，飞出深深杨柳渚。\n鼓击春雷，直破烟波远远回。\n欢声震地，惊退万人争战气。\n金碧楼西，衔得锦标第一归。' },
+  { title:'水调歌头·秋色渐将晚', author:'叶梦得', dynasty:'宋', content:'秋色渐将晚，霜信报黄花。\n小窗低户深映，微路绕欹斜。\n为问山翁何事，坐看流年轻度，拚却鬓双华。\n徙倚望沧海，天净水明霞。\n念平昔，空飘荡，遍天涯。\n归来三径重扫，松竹本吾家。\n却恨悲风时起，冉冉云间新雁，边马怨胡笳。\n谁似东山老，谈笑静胡沙。' },
+  { title:'好事近·渔父词', author:'朱敦儒', dynasty:'宋', content:'摇首出红尘，醒醉更无时节。\n活计绿蓑青笠，惯披霜冲雪。\n晚来风定钓丝闲，上下是新月。\n千里水天一色，看孤鸿明灭。' },
+  { title:'念奴娇·插天翠柳', author:'朱敦儒', dynasty:'宋', content:'插天翠柳，被何人、推上一轮明月。\n照我藤床凉似水，飞入瑶台琼阙。\n雾冷笙箫，风轻环佩，玉锁无人掣。\n闲云收尽，海光天影相接。' },
+  { title:'满江红', author:'岳飞', dynasty:'宋', content:'怒发冲冠，凭栏处、潇潇雨歇。\n抬望眼，仰天长啸，壮怀激烈。\n三十功名尘与土，八千里路云和月。\n莫等闲，白了少年头，空悲切。\n靖康耻，犹未雪。臣子恨，何时灭！\n驾长车，踏破贺兰山缺。\n壮志饥餐胡虏肉，笑谈渴饮匈奴血。\n待从头，收拾旧山河，朝天阙。' },
+  { title:'小重山', author:'岳飞', dynasty:'宋', content:'昨夜寒蛩不住鸣。\n惊回千里梦，已三更。\n起来独自绕阶行。\n人悄悄，帘外月胧明。\n白首为功名。\n旧山松竹老，阻归程。\n欲将心事付瑶琴。\n知音少，弦断有谁听？' },
+  { title:'好事近', author:'杨万里', dynasty:'宋', content:'月未到诚斋，先到万花川谷。\n不是诚斋无月，隔一林修竹。\n如今才是十三夜，月色已如玉。\n未是秋光奇绝，看十五十六。' },
+  { title:'昭君怨·咏荷上雨', author:'杨万里', dynasty:'宋', content:'午梦扁舟花底，香满西湖烟水。\n急雨打篷声，梦初惊。\n却是池荷跳雨，散了真珠还聚。\n聚作水银窝，泻清波。' },
+  { title:'好事近·七月十三日夜登万花川谷望月作', author:'杨万里', dynasty:'宋', content:'月未到诚斋，先到万花川谷。\n不是诚斋无月，隔一林修竹。\n如今才是十三夜，月色已如玉。\n未是秋光奇绝，看十五十六。' },
+  { title:'蝶恋花·送春', author:'朱淑真', dynasty:'宋', content:'楼外垂杨千万缕，欲系青春，少住春还去。\n犹自风前飘柳絮，随春且看归何处。\n绿满山川闻杜宇，便做无情，莫也愁人苦。\n把酒送春春不语，黄昏却下潇潇雨。' },
+  { title:'谒金门', author:'朱淑真', dynasty:'宋', content:'春已半，触目此情无限。\n十二阑干闲倚遍，愁来天不管。\n好是风和日暖，输与莺莺燕燕。\n满院落花帘不卷，断肠芳草远。' },
+  { title:'沉醉东风·秋景', author:'卢挚', dynasty:'元', content:'挂绝壁枯松倒倚，落残霞孤鹜齐飞。\n四围不尽山，一望无穷水。\n散西风满天秋意。\n夜静云帆月影低，载我在潇湘画里。' },
+  { title:'蟾宫曲·别友', author:'卢挚', dynasty:'元', content:'画船儿载将春去也，空留下半江明月。' },
+  { title:'清江引·秋怀', author:'张可久', dynasty:'元', content:'西风信来家万里，问我归期未？\n雁啼红叶天，人醉黄花地，芭蕉雨声秋梦里。' },
+  { title:'殿前欢·离思', author:'张可久', dynasty:'元', content:'月笼沙，十年心事付琵琶。\n相思懒看帏画，人在天涯。\n春残豆蔻花，情寄鸳鸯帕，香冷荼蘼架。\n旧游池阁，总是烟霞。' },
+  { title:'天净沙·即事', author:'乔吉', dynasty:'元', content:'莺莺燕燕春春，花花柳柳真真，事事风风韵韵。\n娇娇嫩嫩，停停当当人人。' },
+  { title:'水仙子·重观瀑布', author:'乔吉', dynasty:'元', content:'天机织罢月梭闲，石壁高垂雪练寒。\n冰丝带雨悬霄汉，几千年晒未干。\n露华凉人怯衣单。\n似白虹饮涧，玉龙下山，晴雪飞滩。' },
+  { title:'折桂令·春情', author:'徐再思', dynasty:'元', content:'平生不会相思，才会相思，便害相思。\n身似浮云，心如飞絮，气若游丝。\n空一缕余香在此，盼千金游子何之。\n证候来时，正是何时？灯半昏时，月半明时。' },
+  { title:'山坡羊·道情', author:'宋方壶', dynasty:'元', content:'青山相待，白云相爱，梦不到紫罗袍共黄金带。\n一茅斋，野花开。\n管甚谁家兴废谁成败，陋巷箪瓢亦乐哉。\n贫，气不改；达，志不改。' },
+  { title:'别云间', author:'夏完淳', dynasty:'明', content:'三年羁旅客，今日又南冠。\n无限山河泪，谁言天地宽。\n已知泉路近，欲别故乡难。\n毅魄归来日，灵旗空际看。' },
+  { title:'寄丘生东粤', author:'呼文如', dynasty:'明', content:'郎马无凭似断蓬，妾身只在广寒宫。\n嫦娥亦解怜孤另，不许清光照别离。' },
+  { title:'遗夫人书', author:'夏完淳', dynasty:'明', content:'三月结缡，便遭大变。\n而累淑女，相依外家。\n未尝以家门盛衰，微见颜色。\n虽德曜齐眉，未可相喻。' },
+  { title:'清明', author:'高翥', dynasty:'宋', content:'南北山头多墓田，清明祭扫各纷然。\n纸灰飞作白蝴蝶，泪血染成红杜鹃。\n日落狐狸眠冢上，夜归儿女笑灯前。\n人生有酒须当醉，一滴何曾到九泉。' },
+  { title:'插秧歌', author:'杨万里', dynasty:'宋', content:'田夫抛秧田妇接，小儿拔秧大儿插。\n笠是兜鍪蓑是甲，雨从头上湿到胛。\n唤渠朝餐歇半霎，低头折腰只不答。\n秧根未牢莳未匝，照管鹅儿与雏鸭。' },
+  { title:'初入淮河四绝句', author:'杨万里', dynasty:'宋', content:'船离洪泽岸头沙，人到淮河意不佳。\n何必桑乾方是远，中流以北即天涯。' },
+  { title:'江村晚眺', author:'戴复古', dynasty:'宋', content:'江头落日照平沙，潮退渔舠阁岸斜。\n白鸟一双临水立，见人惊起入芦花。' },
+  { title:'军中乐', author:'刘克庄', dynasty:'宋', content:'行营面面设刁斗，帐门深深万人守。\n将军贵重不据鞍，夜夜发兵防隘口。\n自言虏畏不敢犯，射麋捕鹿来行酒。\n更阑酒醒山月落，彩缣百段支女乐。\n谁知营中血战人，无钱得合金疮药。' },
+  { title:'戊辰即事', author:'刘克庄', dynasty:'宋', content:'诗人安得有青衫？今岁和戎百万缣。\n从此西湖休插柳，剩栽桑树养吴蚕。' },
+  { title:'湖州歌', author:'汪元量', dynasty:'宋', content:'北望燕云不尽头，大江东去水悠悠。\n夕阳一片寒鸦外，目断东南四百州。' },
+  { title:'秋日', author:'程颢', dynasty:'宋', content:'闲来无事不从容，睡觉东窗日已红。\n万物静观皆自得，四时佳兴与人同。\n道通天地有形外，思入风云变态中。\n富贵不淫贫贱乐，男儿到此是豪雄。' },
+  { title:'偶成', author:'程颢', dynasty:'宋', content:'闲来无事不从容，睡觉东窗日已红。\n万物静观皆自得，四时佳兴与人同。' },
+  { title:'樵夫', author:'萧德藻', dynasty:'宋', content:'一担干柴古渡头，盘缠一日颇优游。\n归来涧底磨刀斧，又作全家明日谋。' },
+  { title:'古戍', author:'刘基', dynasty:'明', content:'古戍连山火，新城殷地笳。\n九州犹虎豹，四海未桑麻。\n天迥云垂草，江空雪覆沙。\n野梅烧不尽，时见两三花。' },
+  { title:'五月十九日大雨', author:'刘基', dynasty:'明', content:'风驱急雨洒高城，云压轻雷殷地声。\n雨过不知龙去处，一池草色万蛙鸣。' },
+  { title:'感怀', author:'刘基', dynasty:'明', content:'结发事远游，逍遥观四方。\n天地一何阔，山川杳茫茫。\n众鸟各自飞，乔木空苍凉。\n登高见万里，怀古使心伤。' },
+  { title:'塞上曲', author:'徐祯卿', dynasty:'明', content:'风急交河水正浑，黄沙日落战云昏。\n汉家天子今神武，不肯和亲出玉门。' },
+  { title:'登太白楼', author:'王世贞', dynasty:'明', content:'昔闻李供奉，长啸独登楼。\n此地一垂顾，高名百代留。\n白云海色曙，明月天门秋。\n欲觅重来者，潺湲济水流。' },
+  { title:'塞下曲', author:'高启', dynasty:'明', content:'日落五原塞，萧条亭堠空。\n汉家讨狂虏，籍役满山东。\n去年出飞狐，今年出云中。\n得地不足耕，杀伤以为功。\n登高望衰草，感叹意何穷。' },
+  { title:'春暮西园', author:'高启', dynasty:'明', content:'绿池芳草满晴波，春色都从雨里过。\n知是人家花落尽，菜畦今日蝶来多。' },
+  { title:'寻胡隐君', author:'高启', dynasty:'明', content:'渡水复渡水，看花还看花。\n春风江上路，不觉到君家。' },
+  { title:'京师得家书', author:'袁凯', dynasty:'明', content:'江水三千里，家书十五行。\n行行无别语，只道早还乡。' },
+  { title:'客中除夕', author:'袁凯', dynasty:'明', content:'今夕为何夕，他乡说故乡。\n看人儿女大，为客岁年长。\n戎马无休歇，关山正渺茫。\n一杯椒叶酒，未敌泪千行。' },
+  { title:'重赠吴国宾', author:'边贡', dynasty:'明', content:'汉江明月照归人，万里秋风一叶身。\n休把客衣轻浣濯，此中犹有帝京尘。' },
+  { title:'出郊', author:'杨慎', dynasty:'明', content:'高田如楼梯，平田如棋局。\n白鹭忽飞来，点破秧针绿。' },
+  { title:'宿金沙江', author:'杨慎', dynasty:'明', content:'往年曾向嘉陵宿，驿楼东畔阑干曲。\n江声彻夜搅离愁，月色中天照幽独。\n岂意飘零瘴海头，嘉陵回首转悠悠。\n江声月色那堪说，肠断金沙万里楼。' },
+  { title:'梦中绝句', author:'王阳明', dynasty:'明', content:'险夷原不滞胸中，何异浮云过太空。\n夜静海涛三万里，月明飞锡下天风。' },
+  { title:'泛海', author:'王阳明', dynasty:'明', content:'险夷原不滞胸中，何异浮云过太空。\n夜静海涛三万里，月明飞锡下天风。' },
+  { title:'村舍', author:'袁枚', dynasty:'清', content:'乱石堆中觅故基，偶来林下叩荆扉。\n主人不在芭蕉在，红蓼花开白鹭飞。' },
+  { title:'随园记', author:'袁枚', dynasty:'清', content:'余竟以一官易此园，园之奇可以见矣。\n使吾官于此，则月一至焉。\n使吾居于此，则日日至焉。\n二者不可得兼，舍官而取园者也。' },
+  { title:'十二月十五夜', author:'袁枚', dynasty:'清', content:'沉沉更鼓急，渐渐人声绝。\n吹灯窗更明，月照一天雪。' },
+  { title:'出塞', author:'徐锡麟', dynasty:'清', content:'军歌应唱大刀环，誓灭胡奴出玉关。\n只解沙场为国死，何须马革裹尸还。' },
+  { title:'狱中题壁', author:'谭嗣同', dynasty:'清', content:'望门投止思张俭，忍死须臾待杜根。\n我自横刀向天笑，去留肝胆两昆仑。' },
+  { title:'有感', author:'谭嗣同', dynasty:'清', content:'世间无物抵春愁，合向苍冥一哭休。\n四万万人齐下泪，天涯何处是神州。' },
+  { title:'对酒', author:'秋瑾', dynasty:'清', content:'不惜千金买宝刀，貂裘换酒也堪豪。\n一腔热血勤珍重，洒去犹能化碧涛。' },
+  { title:'黄海舟中日人索句并见日俄战争地图', author:'秋瑾', dynasty:'清', content:'万里乘风去复来，只身东海挟春雷。\n忍看图画移颜色，肯使江山付劫灰。\n浊酒不销忧国泪，救时应仗出群才。\n拼将十万头颅血，须把乾坤力挽回。' },
+  { title:'满江红·小住京华', author:'秋瑾', dynasty:'清', content:'小住京华，早又是、中秋佳节。\n为篱下、黄花开遍，秋容如拭。\n四面歌残终破楚，八年风味徒思浙。\n苦将侬、强派作蛾眉，殊未屑！\n身不得，男儿列。心却比，男儿烈！\n算平生肝胆，因人常热。\n俗子胸襟谁识我？英雄末路当磨折。\n莽红尘、何处觅知音？青衫湿！' },
+  { title:'精卫', author:'顾炎武', dynasty:'清', content:'万事有不平，尔何空自苦。\n长将一寸身，衔木到终古？\n我愿平东海，身沉心不改。\n大海无平期，我心无绝时。\n呜呼！君不见，西山衔木众鸟多，鹊来燕去自成窠。' },
+  { title:'马嵬', author:'袁枚', dynasty:'清', content:'莫唱当年长恨歌，人间亦自有银河。\n石壕村里夫妻别，泪比长生殿上多。' },
+  { title:'遣兴', author:'袁枚', dynasty:'清', content:'爱好由来下笔难，一诗千改始心安。\n阿婆还似初笄女，头未梳成不许看。' },
+  { title:'岁暮到家', author:'蒋士铨', dynasty:'清', content:'爱子心无尽，归家喜及辰。\n寒衣针线密，家信墨痕新。\n见面怜清瘦，呼儿问苦辛。\n低徊愧人子，不敢叹风尘。' },
+  { title:'偶然作', author:'屈复', dynasty:'清', content:'百金买骏马，千金买美人。\n万金买高爵，何处买青春？' },
+  { title:'秋海棠', author:'秋瑾', dynasty:'清', content:'栽植恩深雨露同，一丛浅淡一丛浓。\n平生不借春光力，几度开来斗晚风？' },
+
+  // ======== 扩编八 — 最终补遗至1000首 ========
+  { title:'相思怨', author:'李冶', dynasty:'唐', content:'人道海水深，不抵相思半。\n海水尚有涯，相思渺无畔。\n携琴上高楼，楼虚月华满。\n弹著相思曲，弦肠一时断。' },
+  { title:'八至', author:'李冶', dynasty:'唐', content:'至近至远东西，至深至浅清溪。\n至高至明日月，至亲至疏夫妻。' },
+  { title:'江陵愁望有寄', author:'鱼玄机', dynasty:'唐', content:'枫叶千枝复万枝，江桥掩映暮帆迟。\n忆君心似西江水，日夜东流无歇时。' },
+  { title:'赠邻女', author:'鱼玄机', dynasty:'唐', content:'羞日遮罗袖，愁春懒起妆。\n易求无价宝，难得有心郎。\n枕上潜垂泪，花间暗断肠。\n自能窥宋玉，何必恨王昌？' },
+  { title:'送友人', author:'薛涛', dynasty:'唐', content:'水国蒹葭夜有霜，月寒山色共苍苍。\n谁言千里自今夕，离梦杳如关塞长。' },
+  { title:'筹边楼', author:'薛涛', dynasty:'唐', content:'平临云鸟八窗秋，壮压西川四十州。\n诸将莫贪羌族马，最高层处见边头。' },
+  { title:'春望词', author:'薛涛', dynasty:'唐', content:'花开不同赏，花落不同悲。\n欲问相思处，花开花落时。' },
+  { title:'啰唝曲六首', author:'刘采春', dynasty:'唐', content:'不喜秦淮水，生憎江上船。\n载儿夫婿去，经岁又经年。\n借问东园柳，枯来得几年。\n自无枝叶分，莫恐太阳偏。' },
+  { title:'如意娘', author:'武则天', dynasty:'唐', content:'看朱成碧思纷纷，憔悴支离为忆君。\n不信比来长下泪，开箱验取石榴裙。' },
+  { title:'彩书怨', author:'上官婉儿', dynasty:'唐', content:'叶下洞庭初，思君万里余。\n露浓香被冷，月落锦屏虚。\n欲奏江南曲，贪封蓟北书。\n书中无别意，惟怅久离居。' },
+  { title:'奉和圣制立春日侍宴内殿出翦彩花应制', author:'上官婉儿', dynasty:'唐', content:'密叶因裁吐，新花逐翦舒。\n攀条虽不谬，摘蕊讵知虚。\n春至由来发，秋还未肯疏。\n借问桃将李，相乱欲何如。' },
+  { title:'拜新月', author:'李端', dynasty:'唐', content:'开帘见新月，便即下阶拜。\n细语人不闻，北风吹裙带。' },
+  { title:'鸣筝', author:'李端', dynasty:'唐', content:'鸣筝金粟柱，素手玉房前。\n欲得周郎顾，时时误拂弦。' },
+  { title:'听筝', author:'李端', dynasty:'唐', content:'鸣筝金粟柱，素手玉房前。\n欲得周郎顾，时时误拂弦。' },
+  { title:'溪居', author:'柳宗元', dynasty:'唐', content:'久为簪组累，幸此南夷谪。\n闲依农圃邻，偶似山林客。\n晓耕翻露草，夜榜响溪石。\n来往不逢人，长歌楚天碧。' },
+  { title:'感遇十二首·其一', author:'张九龄', dynasty:'唐', content:'兰叶春葳蕤，桂华秋皎洁。\n欣欣此生意，自尔为佳节。\n谁知林栖者，闻风坐相悦。\n草木有本心，何求美人折！' },
+  { title:'秋夜曲', author:'王维', dynasty:'唐', content:'桂魄初生秋露微，轻罗已薄未更衣。\n银筝夜久殷勤弄，心怯空房不忍归。' },
+  { title:'老将行', author:'王维', dynasty:'唐', content:'少年十五二十时，步行夺得胡马骑。\n射杀山中白额虎，肯数邺下黄须儿。\n一身转战三千里，一剑曾当百万师。\n汉兵奋迅如霹雳，虏骑崩腾畏蒺藜。\n卫青不败由天幸，李广无功缘数奇。\n自从弃置便衰朽，世事蹉跎成白首。\n昔时飞箭无全目，今日垂杨生左肘。\n路旁时卖故侯瓜，门前学种先生柳。' },
+  { title:'桃源行', author:'王维', dynasty:'唐', content:'渔舟逐水爱山春，两岸桃花夹古津。\n坐看红树不知远，行尽青溪不见人。\n山口潜行始隈隩，山开旷望旋平陆。\n遥看一处攒云树，近入千家散花竹。\n樵客初传汉姓名，居人未改秦衣服。\n居人共住武陵源，还从物外起田园。\n月明松下房栊静，日出云中鸡犬喧。\n惊闻俗客争来集，竞引还家问都邑。' },
+  { title:'洛阳女儿行', author:'王维', dynasty:'唐', content:'洛阳女儿对门居，才可颜容十五余。\n良人玉勒乘骢马，侍女金盘脍鲤鱼。\n画阁朱楼尽相望，红桃绿柳垂檐向。\n罗帷送上七香车，宝扇迎归九华帐。\n狂夫富贵在青春，意气骄奢剧季伦。\n自怜碧玉亲教舞，不惜珊瑚持与人。' },
+  { title:'酬郭给事', author:'王维', dynasty:'唐', content:'洞门高阁霭余辉，桃李阴阴柳絮飞。\n禁里疏钟官舍晚，省中啼鸟吏人稀。\n晨摇玉佩趋金殿，夕奉天书拜琐闱。\n强欲从君无那老，将因卧病解朝衣。' },
+  { title:'渭川田家', author:'王维', dynasty:'唐', content:'斜阳照墟落，穷巷牛羊归。\n野老念牧童，倚杖候荆扉。\n雉雊麦苗秀，蚕眠桑叶稀。\n田夫荷锄至，相见语依依。\n即此羡闲逸，怅然吟式微。' },
+  { title:'送梓州李使君', author:'王维', dynasty:'唐', content:'万壑树参天，千山响杜鹃。\n山中一夜雨，树杪百重泉。\n汉女输橦布，巴人讼芋田。\n文翁翻教授，不敢倚先贤。' },
+  { title:'观猎', author:'王维', dynasty:'唐', content:'风劲角弓鸣，将军猎渭城。\n草枯鹰眼疾，雪尽马蹄轻。\n忽过新丰市，还归细柳营。\n回看射雕处，千里暮云平。' },
+  { title:'汉江临眺', author:'王维', dynasty:'唐', content:'楚塞三湘接，荆门九派通。\n江流天地外，山色有无中。\n郡邑浮前浦，波澜动远空。\n襄阳好风日，留醉与山翁。' },
+  { title:'寄荆州张丞相', author:'王维', dynasty:'唐', content:'所思竟何在，怅望深荆门。\n举世无相识，终身思旧恩。\n方将与农圃，艺植老丘园。\n目尽南飞雁，何由寄一言。' },
+  { title:'山中送别', author:'王维', dynasty:'唐', content:'山中相送罢，日暮掩柴扉。\n春草明年绿，王孙归不归。' },
+  { title:'书事', author:'王维', dynasty:'唐', content:'轻阴阁小雨，深院昼慵开。\n坐看苍苔色，欲上人衣来。' },
+  { title:'栾家濑', author:'王维', dynasty:'唐', content:'飒飒秋雨中，浅浅石溜泻。\n跳波自相溅，白鹭惊复下。' },
+  { title:'田园乐·其六', author:'王维', dynasty:'唐', content:'桃红复含宿雨，柳绿更带朝烟。\n花落家童未扫，莺啼山客犹眠。' },
+  { title:'少年行·其一', author:'王维', dynasty:'唐', content:'新丰美酒斗十千，咸阳游侠多少年。\n相逢意气为君饮，系马高楼垂柳边。' },
+  { title:'伊州歌', author:'王维', dynasty:'唐', content:'清风明月苦相思，荡子从戎十载余。\n征人去日殷勤嘱，归雁来时数附书。' },
+  { title:'叹白发', author:'王维', dynasty:'唐', content:'宿昔朱颜成暮齿，须臾白发变垂髫。\n一生几许伤心事，不向空门何处销。' },
+  { title:'辋川闲居赠裴秀才迪', author:'王维', dynasty:'唐', content:'寒山转苍翠，秋水日潺湲。\n倚杖柴门外，临风听暮蝉。\n渡头余落日，墟里上孤烟。\n复值接舆醉，狂歌五柳前。' },
+  { title:'宫词·故国三千里', author:'张祜', dynasty:'唐', content:'故国三千里，深宫二十年。\n一声何满子，双泪落君前。' },
+  { title:'题金陵渡', author:'张祜', dynasty:'唐', content:'金陵津渡小山楼，一宿行人自可愁。\n潮落夜江斜月里，两三星火是瓜州。' },
+  { title:'纵游淮南', author:'张祜', dynasty:'唐', content:'十里长街市井连，月明桥上看神仙。\n人生只合扬州死，禅智山光好墓田。' },
+  { title:'题松汀驿', author:'张祜', dynasty:'唐', content:'山色远含空，苍茫泽国东。\n海明先见日，江白迥闻风。\n鸟道高原去，人烟小径通。\n那知旧遗逸，不在五湖中。' },
+  { title:'赠窦家小儿', author:'张祜', dynasty:'唐', content:'深绿衣裳小小人，每来听里解相亲。\n天生合去云霄上，一尺松栽已出尘。' },
+  { title:'正月十五夜灯', author:'张祜', dynasty:'唐', content:'千门开锁万灯明，正月中旬动帝京。\n三百内人连袖舞，一时天上著词声。' },
+  { title:'夜宿山寺', author:'李白', dynasty:'唐', content:'危楼高百尺，手可摘星辰。\n不敢高声语，恐惊天上人。' },
+  { title:'陪侍郎叔游洞庭醉后', author:'李白', dynasty:'唐', content:'刬却君山好，平铺湘水流。\n巴陵无限酒，醉杀洞庭秋。' },
+  { title:'陪族叔刑部侍郎晔及中书贾舍人至游洞庭', author:'李白', dynasty:'唐', content:'南湖秋水夜无烟，耐可乘流直上天。\n且就洞庭赊月色，将船买酒白云边。' },
+  { title:'咏苎萝山', author:'李白', dynasty:'唐', content:'西施越溪女，出自苎萝山。\n秀色掩今古，荷花羞玉颜。\n浣纱弄碧水，自与清波闲。\n皓齿信难开，沉吟碧云间。' },
+  { title:'山中问答', author:'李白', dynasty:'唐', content:'问余何意栖碧山，笑而不答心自闲。\n桃花流水窅然去，别有天地非人间。' },
+  { title:'劳劳亭', author:'李白', dynasty:'唐', content:'天下伤心处，劳劳送客亭。\n春风知别苦，不遣柳条青。' },
+  { title:'春夜洛城闻笛', author:'李白', dynasty:'唐', content:'谁家玉笛暗飞声，散入春风满洛城。\n此夜曲中闻折柳，何人不起故园情。' },
+  { title:'苏台览古', author:'李白', dynasty:'唐', content:'旧苑荒台杨柳新，菱歌清唱不胜春。\n只今惟有西江月，曾照吴王宫里人。' },
+  { title:'越中览古', author:'李白', dynasty:'唐', content:'越王勾践破吴归，义士还家尽锦衣。\n宫女如花满春殿，只今惟有鹧鸪飞。' },
+  { title:'经下邳圯桥怀张子房', author:'李白', dynasty:'唐', content:'子房未虎啸，破产不为家。\n沧海得壮士，椎秦博浪沙。\n报韩虽不成，天地皆振动。\n潜匿游下邳，岂曰非智勇？\n我来圯桥上，怀古钦英风。\n唯见碧流水，曾无黄石公。\n叹息此人去，萧条徐泗空。' },
+  { title:'沙丘城下寄杜甫', author:'李白', dynasty:'唐', content:'我来竟何事，高卧沙丘城。\n城边有古树，日夕连秋声。\n鲁酒不可醉，齐歌空复情。\n思君若汶水，浩荡寄南征。' },
+  { title:'鲁郡东石门送杜二甫', author:'李白', dynasty:'唐', content:'醉别复几日，登临遍池台。\n何时石门路，重有金樽开。\n秋波落泗水，海色明徂徕。\n飞蓬各自远，且尽手中杯。' },
+  { title:'哭晁卿衡', author:'李白', dynasty:'唐', content:'日本晁卿辞帝都，征帆一片绕蓬壶。\n明月不归沉碧海，白云愁色满苍梧。' },
+  { title:'秋下荆门', author:'李白', dynasty:'唐', content:'霜落荆门江树空，布帆无恙挂秋风。\n此行不为鲈鱼鲙，自爱名山入剡中。' },
+  { title:'别储邕之剡中', author:'李白', dynasty:'唐', content:'借问剡中道，东南指越乡。\n舟从广陵去，水入会稽长。\n竹色溪下绿，荷花镜里香。\n辞君向天姥，拂石卧秋霜。' },
+  { title:'天台晓望', author:'李白', dynasty:'唐', content:'天台邻四明，华顶高百越。\n门标赤城霞，楼栖沧岛月。\n凭高登远览，直下见溟渤。\n云垂大鹏翻，波动巨鳌没。' },
+  { title:'送温处士归黄山白鹅峰旧居', author:'李白', dynasty:'唐', content:'黄山四千仞，三十二莲峰。\n丹崖夹石柱，菡萏金芙蓉。\n伊昔升绝顶，下窥天目松。\n仙人炼玉处，羽化留余踪。' },
+  { title:'宿五松山下荀媪家', author:'李白', dynasty:'唐', content:'我宿五松下，寂寥无所欢。\n田家秋作苦，邻女夜舂寒。\n跪进雕胡饭，月光明素盘。\n令人惭漂母，三谢不能餐。' },
+  { title:'丁都护歌', author:'李白', dynasty:'唐', content:'云阳上征去，两岸饶商贾。\n吴牛喘月时，拖船一何苦。\n水浊不可饮，壶浆半成土。\n一唱都护歌，心摧泪如雨。\n万人凿盘石，无由达江浒。\n君看石芒砀，掩泪悲千古。' },
+  { title:'长干行', author:'李白', dynasty:'唐', content:'妾发初覆额，折花门前剧。\n郎骑竹马来，绕床弄青梅。\n同居长干里，两小无嫌猜。\n十四为君妇，羞颜未尝开。\n低头向暗壁，千唤不一回。\n十五始展眉，愿同尘与灰。\n常存抱柱信，岂上望夫台。\n十六君远行，瞿塘滟滪堆。\n五月不可触，猿声天上哀。\n门前迟行迹，一一生绿苔。\n苔深不能扫，落叶秋风早。\n八月蝴蝶黄，双飞西园草。\n感此伤妾心，坐愁红颜老。\n早晚下三巴，预将书报家。\n相迎不道远，直至长风沙。' },
+
+  // ======== 扩编九 — 收官至1000+ ========
+  { title:'秋浦歌十七首·其十四', author:'李白', dynasty:'唐', content:'炉火照天地，红星乱紫烟。\n赧郎明月夜，歌曲动寒川。' },
+  { title:'永王东巡歌·其二', author:'李白', dynasty:'唐', content:'三川北虏乱如麻，四海南奔似永嘉。\n但用东山谢安石，为君谈笑静胡沙。' },
+  { title:'塞上听吹笛', author:'高适', dynasty:'唐', content:'雪净胡天牧马还，月明羌笛戍楼间。\n借问梅花何处落，风吹一夜满关山。' },
+  { title:'除夜作', author:'高适', dynasty:'唐', content:'旅馆寒灯独不眠，客心何事转凄然。\n故乡今夜思千里，霜鬓明朝又一年。' },
+  { title:'燕歌行', author:'高适', dynasty:'唐', content:'汉家烟尘在东北，汉将辞家破残贼。\n男儿本自重横行，天子非常赐颜色。\n摐金伐鼓下榆关，旌旆逶迤碣石间。\n校尉羽书飞瀚海，单于猎火照狼山。\n山川萧条极边土，胡骑凭陵杂风雨。\n战士军前半死生，美人帐下犹歌舞。\n大漠穷秋塞草腓，孤城落日斗兵稀。\n身当恩遇常轻敌，力尽关山未解围。\n铁衣远戍辛勤久，玉箸应啼别离后。\n少妇城南欲断肠，征人蓟北空回首。\n边庭飘飖那可度，绝域苍茫无所有。\n杀气三时作阵云，寒声一夜传刁斗。\n相看白刃血纷纷，死节从来岂顾勋？\n君不见沙场征战苦，至今犹忆李将军。' },
+  { title:'营州歌', author:'高适', dynasty:'唐', content:'营州少年厌原野，狐裘蒙茸猎城下。\n虏酒千钟不醉人，胡儿十岁能骑马。' },
+  { title:'听张立本女吟', author:'高适', dynasty:'唐', content:'危冠广袖楚宫妆，独步闲庭逐夜凉。\n自把玉钗敲砌竹，清歌一曲月如霜。' },
+  { title:'逢入京使', author:'岑参', dynasty:'唐', content:'故园东望路漫漫，双袖龙钟泪不干。\n马上相逢无纸笔，凭君传语报平安。' },
+  { title:'碛中作', author:'岑参', dynasty:'唐', content:'走马西来欲到天，辞家见月两回圆。\n今夜不知何处宿，平沙万里绝人烟。' },
+  { title:'行军九日思长安故园', author:'岑参', dynasty:'唐', content:'强欲登高去，无人送酒来。\n遥怜故园菊，应傍战场开。' },
+  { title:'山房春事', author:'岑参', dynasty:'唐', content:'梁园日暮乱飞鸦，极目萧条三两家。\n庭树不知人去尽，春来还发旧时花。' },
+  { title:'白雪歌送武判官归京', author:'岑参', dynasty:'唐', content:'北风卷地白草折，胡天八月即飞雪。\n忽如一夜春风来，千树万树梨花开。\n散入珠帘湿罗幕，狐裘不暖锦衾薄。\n将军角弓不得控，都护铁衣冷难着。\n瀚海阑干百丈冰，愁云惨淡万里凝。\n中军置酒饮归客，胡琴琵琶与羌笛。\n纷纷暮雪下辕门，风掣红旗冻不翻。\n轮台东门送君去，去时雪满天山路。\n山回路转不见君，雪上空留马行处。' },
+  { title:'走马川行奉送出师西征', author:'岑参', dynasty:'唐', content:'君不见走马川行雪海边，平沙莽莽黄入天。\n轮台九月风夜吼，一川碎石大如斗，随风满地石乱走。\n匈奴草黄马正肥，金山西见烟尘飞，汉家大将西出师。\n将军金甲夜不脱，半夜军行戈相拨，风头如刀面如割。\n马毛带雪汗气蒸，五花连钱旋作冰，幕中草檄砚水凝。\n虏骑闻之应胆慑，料知短兵不敢接，车师西门伫献捷。' },
+  { title:'望洞庭湖赠张丞相', author:'孟浩然', dynasty:'唐', content:'八月湖水平，涵虚混太清。\n气蒸云梦泽，波撼岳阳城。\n欲济无舟楫，端居耻圣明。\n坐观垂钓者，徒有羡鱼情。' },
+  { title:'夏日南亭怀辛大', author:'孟浩然', dynasty:'唐', content:'山光忽西落，池月渐东上。\n散发乘夕凉，开轩卧闲敞。\n荷风送香气，竹露滴清响。\n欲取鸣琴弹，恨无知音赏。\n感此怀故人，中宵劳梦想。' },
+  { title:'秋宵月下有怀', author:'孟浩然', dynasty:'唐', content:'秋空明月悬，光彩露沾湿。\n惊鹊栖未定，飞萤卷帘入。\n庭槐寒影疏，邻杵夜声急。\n佳期旷何许，望望空伫立。' },
+  { title:'送朱大入秦', author:'孟浩然', dynasty:'唐', content:'游人五陵去，宝剑值千金。\n分手脱相赠，平生一片心。' },
+  { title:'舟中晓望', author:'孟浩然', dynasty:'唐', content:'挂席东南望，青山水国遥。\n舳舻争利涉，来往接风潮。\n问我今何适？天台访石桥。\n坐看霞色晓，疑是赤城标。' },
+  { title:'题义公禅房', author:'孟浩然', dynasty:'唐', content:'义公习禅寂，结宇依空林。\n户外一峰秀，阶前众壑深。\n夕阳连雨足，空翠落庭阴。\n看取莲花净，应知不染心。' },
+  { title:'渡浙江问舟中人', author:'孟浩然', dynasty:'唐', content:'潮落江平未有风，扁舟共济与君同。\n时时引领望天末，何处青山是越中。' },
+  { title:'耶溪泛舟', author:'孟浩然', dynasty:'唐', content:'落景余清辉，轻桡弄溪渚。\n澄明爱水物，临泛何容与。\n白首垂钓翁，新妆浣纱女。\n相看似相识，脉脉不得语。' },
+  { title:'采莲曲', author:'王昌龄', dynasty:'唐', content:'荷叶罗裙一色裁，芙蓉向脸两边开。\n乱入池中看不见，闻歌始觉有人来。' },
+  { title:'送柴侍御', author:'王昌龄', dynasty:'唐', content:'流水通波接武冈，送君不觉有离伤。\n青山一道同云雨，明月何曾是两乡。' },
+  { title:'听流人水调子', author:'王昌龄', dynasty:'唐', content:'孤舟微月对枫林，分付鸣筝与客心。\n岭色千重万重雨，断弦收与泪痕深。' },
+  { title:'题僧房', author:'王昌龄', dynasty:'唐', content:'棕榈花满院，苔藓入闲房。\n彼此名言绝，空中闻异香。' },
+  { title:'朝来曲', author:'王昌龄', dynasty:'唐', content:'月昃鸣珂动，花连绣户春。\n盘龙玉台镜，唯待画眉人。' },
+  { title:'城傍曲', author:'王昌龄', dynasty:'唐', content:'秋风鸣桑条，草白狐兔骄。\n邯郸饮来酒未消，城北原平掣皂雕。\n射杀空营两腾虎，回身却月佩弓弰。' },
+  { title:'观江淮名胜图', author:'王昌龄', dynasty:'唐', content:'刻意吟云山，尤知隐沦妙。\n远公何为者，再诣临海峤。\n而我高其风，披图得遗照。\n援毫无逃境，遂展千里眺。' },
+  { title:'登鹳雀楼', author:'王之涣', dynasty:'唐', content:'白日依山尽，黄河入海流。\n欲穷千里目，更上一层楼。' },
+  { title:'送别', author:'王之涣', dynasty:'唐', content:'杨柳东风树，青青夹御河。\n近来攀折苦，应为别离多。' },
+  { title:'宴词', author:'王之涣', dynasty:'唐', content:'长堤春水绿悠悠，畎入漳河一道流。\n莫听声声催去棹，桃溪浅处不胜舟。' },
+  { title:'凉州词', author:'王翰', dynasty:'唐', content:'葡萄美酒夜光杯，欲饮琵琶马上催。\n醉卧沙场君莫笑，古来征战几人回？' },
+  { title:'山中', author:'王勃', dynasty:'唐', content:'长江悲已滞，万里念将归。\n况属高风晚，山山黄叶飞。' },
+  { title:'咏风', author:'王勃', dynasty:'唐', content:'肃肃凉风生，加我林壑清。\n驱烟寻涧户，卷雾出山楹。\n去来固无迹，动息如有情。\n日落山水静，为君起松声。' },
+  { title:'春庄', author:'王勃', dynasty:'唐', content:'山中兰叶径，城外李桃园。\n岂知人事静，不觉鸟声喧。' },
+  { title:'铜雀妓', author:'王勃', dynasty:'唐', content:'金凤邻铜雀，漳河望邺城。\n君王无处所，台榭若平生。\n舞席纷何就，歌梁俨未倾。\n西陵松槚冷，谁见绮罗情。' },
+  { title:'羁春', author:'王勃', dynasty:'唐', content:'客心千里倦，春事一朝归。\n还伤北园里，重见落花飞。' },
+  { title:'林塘怀友', author:'王勃', dynasty:'唐', content:'芳屏画春草，仙杼织朝霞。\n何如山水路，对面即飞花。' },
+  { title:'山扉夜坐', author:'王勃', dynasty:'唐', content:'抱琴开野室，携酒对情人。\n林塘花月下，别似一家春。' },
+  { title:'春游', author:'王勃', dynasty:'唐', content:'客念纷无极，春泪倍成行。\n今朝花树下，不觉恋年光。' },
+  { title:'登城春望', author:'王勃', dynasty:'唐', content:'物外山川近，晴初景霭新。\n芳郊花柳遍，何处不宜春。' },
+  { title:'夜兴', author:'王勃', dynasty:'唐', content:'野烟含夕渚，山月照秋林。\n还将中散兴，来偶步兵琴。' },
+  { title:'临江', author:'王勃', dynasty:'唐', content:'泛泛东流水，飞飞北上尘。\n归骖将别棹，俱是倦游人。' },
+  { title:'别人·其二', author:'王勃', dynasty:'唐', content:'江上风烟积，山幽云雾多。\n送君南浦外，还望将如何。' },
+  { title:'赠李十四·其一', author:'王勃', dynasty:'唐', content:'野客思茅宇，山人爱竹林。\n琴尊唯待处，风月自相寻。' },
+  { title:'重别薛华', author:'王勃', dynasty:'唐', content:'明月沉珠浦，秋风濯锦川。\n楼台临绝岸，洲渚亘长天。\n旅泊成千里，栖遑共百年。\n穷途唯有泪，还望独潸然。' },
+  { title:'寻道观', author:'王勃', dynasty:'唐', content:'芝廛光分野，蓬阙盛规模。\n碧坛清桂阈，丹洞肃松枢。\n玉笈三山记，金箱五岳图。\n苍虬不可得，空望白云衢。' },
+  { title:'游梵宇三觉寺', author:'王勃', dynasty:'唐', content:'杏阁披青磴，雕台控紫岑。\n叶齐山路狭，花积野坛深。\n萝幌栖禅影，松门听梵音。\n遽忻陪妙躅，延赏涤烦襟。' },
+  { title:'仲春郊外', author:'王勃', dynasty:'唐', content:'东园垂柳径，西堰落花津。\n物色连三月，风光绝四邻。\n鸟飞村觉曙，鱼戏水知春。\n初晴山院里，何处染嚣尘。' },
+  { title:'郊兴', author:'王勃', dynasty:'唐', content:'空园歌独酌，春日赋闲居。\n泽兰侵小径，河柳覆长渠。\n雨去花光湿，风归叶影疏。\n山人不惜醉，唯畏绿尊虚。' },
+  { title:'对酒春园作', author:'王勃', dynasty:'唐', content:'投簪下山阁，携酒对河梁。\n狭水牵长镜，高花送断香。\n繁莺歌似曲，疏蝶舞成行。\n自然催一醉，非但阅年光。' },
+  { title:'春日还郊', author:'王勃', dynasty:'唐', content:'闲情兼嘿语，携杖赴岩泉。\n草绿萦新带，榆青缀古钱。\n鱼床侵岸水，鸟路入山烟。\n还题平子赋，花树满春田。' },
+  { title:'秋日别王长史', author:'王勃', dynasty:'唐', content:'别路余千里，深恩重百年。\n正悲西候日，更动北梁篇。\n野色笼寒雾，山光敛暮烟。\n终知难再奉，怀德自潸然。' },
+
+  // ======== 扩编十 — 冲千收官 ========
+  { title:'落花', author:'李商隐', dynasty:'唐', content:'高阁客竟去，小园花乱飞。\n参差连曲陌，迢递送斜晖。\n肠断未忍扫，眼穿仍欲归。\n芳心向春尽，所得是沾衣。' },
+  { title:'蝉', author:'李商隐', dynasty:'唐', content:'本以高难饱，徒劳恨费声。\n五更疏欲断，一树碧无情。\n薄宦梗犹泛，故园芜已平。\n烦君最相警，我亦举家清。' },
+  { title:'赠荷花', author:'李商隐', dynasty:'唐', content:'世间花叶不相伦，花入金盆叶作尘。\n惟有绿荷红菡萏，卷舒开合任天真。\n此花此叶常相映，翠减红衰愁杀人。' },
+  { title:'暮秋独游曲江', author:'李商隐', dynasty:'唐', content:'荷叶生时春恨生，荷叶枯时秋恨成。\n深知身在情长在，怅望江头江水声。' },
+  { title:'端居', author:'李商隐', dynasty:'唐', content:'远书归梦两悠悠，只有空床敌素秋。\n阶下青苔与红树，雨中寥落月中愁。' },
+  { title:'天涯', author:'李商隐', dynasty:'唐', content:'春日在天涯，天涯日又斜。\n莺啼如有泪，为湿最高花。' },
+  { title:'微雨', author:'李商隐', dynasty:'唐', content:'初随林霭动，稍共夜凉分。\n窗迥侵灯冷，庭虚近水闻。' },
+  { title:'细雨', author:'李商隐', dynasty:'唐', content:'帷飘白玉堂，簟卷碧牙床。\n楚女当时意，萧萧发彩凉。' },
+  { title:'滞雨', author:'李商隐', dynasty:'唐', content:'滞雨长安夜，残灯独客愁。\n故乡云水地，归梦不宜秋。' },
+  { title:'登乐游原', author:'李商隐', dynasty:'唐', content:'向晚意不适，驱车登古原。\n夕阳无限好，只是近黄昏。' },
+  { title:'宫辞', author:'李商隐', dynasty:'唐', content:'君恩如水向东流，得宠忧移失宠愁。\n莫向尊前奏花落，凉风只在殿西头。' },
+  { title:'汉宫词', author:'李商隐', dynasty:'唐', content:'青雀西飞竟未回，君王长在集灵台。\n侍臣最有相如渴，不赐金茎露一杯。' },
+  { title:'梦泽', author:'李商隐', dynasty:'唐', content:'梦泽悲风动白茅，楚王葬尽满城娇。\n未知歌舞能多少，虚减宫厨为细腰。' },
+  { title:'柳', author:'李商隐', dynasty:'唐', content:'曾逐东风拂舞筵，乐游春苑断肠天。\n如何肯到清秋日，已带斜阳又带蝉。' },
+  { title:'夕阳楼', author:'李商隐', dynasty:'唐', content:'花明柳暗绕天愁，上尽重城更上楼。\n欲问孤鸿向何处，不知身世自悠悠。' },
+  { title:'板桥晓别', author:'李商隐', dynasty:'唐', content:'回望高城落晓河，长亭窗户压微波。\n水仙欲上鲤鱼去，一夜芙蓉红泪多。' },
+  { title:'银河吹笙', author:'李商隐', dynasty:'唐', content:'怅望银河吹玉笙，楼寒院冷接平明。\n重衾幽梦他年断，别树羁雌昨夜惊。\n月榭故香因雨发，风帘残烛隔霜清。\n不须浪作缑山意，湘瑟秦箫自有情。' },
+  { title:'日日', author:'李商隐', dynasty:'唐', content:'日日春光斗日光，山城斜路杏花香。\n几时心绪浑无事，得及游丝百尺长。' },
+  { title:'花下醉', author:'李商隐', dynasty:'唐', content:'寻芳不觉醉流霞，倚树沉眠日已斜。\n客散酒醒深夜后，更持红烛赏残花。' },
+  { title:'楚吟', author:'李商隐', dynasty:'唐', content:'山上离宫宫上楼，楼前宫畔暮江流。\n楚天长短黄昏雨，宋玉无愁亦自愁。' },
+  { title:'瑶池', author:'李商隐', dynasty:'唐', content:'瑶池阿母绮窗开，黄竹歌声动地哀。\n八骏日行三万里，穆王何事不重来。' },
+  { title:'南朝', author:'李商隐', dynasty:'唐', content:'地险悠悠天险长，金陵王气应瑶光。\n休夸此地分天下，只得徐妃半面妆。' },
+  { title:'北齐', author:'李商隐', dynasty:'唐', content:'一笑相倾国便亡，何劳荆棘始堪伤。\n小怜玉体横陈夜，已报周师入晋阳。' },
+  { title:'咏史', author:'李商隐', dynasty:'唐', content:'北湖南埭水漫漫，一片降旗百尺竿。\n三百年间同晓梦，钟山何处有龙盘。' },
+  { title:'听鼓', author:'李商隐', dynasty:'唐', content:'城头叠鼓声，城下暮江清。\n欲问渔阳掺，时无祢正平。' },
+  { title:'悼伤后赴东蜀辟至散关遇雪', author:'李商隐', dynasty:'唐', content:'剑外从军远，无家与寄衣。\n散关三尺雪，回梦旧鸳机。' },
+  { title:'幽居冬暮', author:'李商隐', dynasty:'唐', content:'羽翼摧残日，郊园寂寞时。\n晓鸡惊树雪，寒鹜守冰池。\n急景忽云暮，颓年浸已衰。\n如何匡国分，不与夙心期。' },
+  { title:'桂林', author:'李商隐', dynasty:'唐', content:'城窄山将压，江宽地共浮。\n东南通绝域，西北有高楼。\n神护青枫岸，龙移白石湫。\n殊乡竟何祷，箫鼓不曾休。' },
+  { title:'陈后宫', author:'李商隐', dynasty:'唐', content:'茂苑城如画，阊门瓦欲流。\n还依水光殿，更起月华楼。\n侵夜鸾开镜，迎冬雉献裘。\n从臣皆半醉，天子正无愁。' },
+  { title:'无题·凤尾香罗薄几重', author:'李商隐', dynasty:'唐', content:'凤尾香罗薄几重，碧文圆顶夜深缝。\n扇裁月魄羞难掩，车走雷声语未通。\n曾是寂寥金烬暗，断无消息石榴红。\n斑骓只系垂杨岸，何处西南任好风。' },
+  { title:'无题·重帏深下莫愁堂', author:'李商隐', dynasty:'唐', content:'重帏深下莫愁堂，卧后清宵细细长。\n神女生涯原是梦，小姑居处本无郎。\n风波不信菱枝弱，月露谁教桂叶香。\n直道相思了无益，未妨惆怅是清狂。' },
+  { title:'代赠', author:'李商隐', dynasty:'唐', content:'楼上黄昏欲望休，玉梯横绝月如钩。\n芭蕉不展丁香结，同向春风各自愁。' },
+  { title:'离亭赋得折杨柳·其一', author:'李商隐', dynasty:'唐', content:'暂凭尊酒送无憀，莫损愁眉与细腰。\n人世死前惟有别，春风争拟惜长条。' },
+  { title:'碧城', author:'李商隐', dynasty:'唐', content:'碧城十二曲阑干，犀辟尘埃玉辟寒。\n阆苑有书多附鹤，女床无树不栖鸾。\n星沉海底当窗见，雨过河源隔座看。\n若是晓珠明又定，一生长对水晶盘。' },
+  { title:'无题·来是空言去绝踪', author:'李商隐', dynasty:'唐', content:'来是空言去绝踪，月斜楼上五更钟。\n梦为远别啼难唤，书被催成墨未浓。\n蜡照半笼金翡翠，麝熏微度绣芙蓉。\n刘郎已恨蓬山远，更隔蓬山一万重。' },
+  { title:'无题·相见时难别亦难', author:'李商隐', dynasty:'唐', content:'相见时难别亦难，东风无力百花残。\n春蚕到死丝方尽，蜡炬成灰泪始干。\n晓镜但愁云鬓改，夜吟应觉月光寒。\n蓬山此去无多路，青鸟殷勤为探看。' },
+  { title:'石榴', author:'李商隐', dynasty:'唐', content:'榴枝婀娜榴实繁，榴膜轻明榴子鲜。\n可羡瑶池碧桃树，碧桃红颊一千年。' },
+  { title:'月夕', author:'李商隐', dynasty:'唐', content:'草下阴虫叶上霜，朱栏迢递压湖光。\n兔寒蟾冷桂花白，此夜姮娥应断肠。' },
+  { title:'屏风', author:'李商隐', dynasty:'唐', content:'六曲连环接翠帷，高楼半夜酒醒时。\n展衾卧听南宫雨，回廊行到西厢月。' },
+  { title:'风雨', author:'李商隐', dynasty:'唐', content:'凄凉宝剑篇，羁泊欲穷年。\n黄叶仍风雨，青楼自管弦。\n新知遭薄俗，旧好隔良缘。\n心断新丰酒，销愁斗几千。' },
+  { title:'夜半', author:'李商隐', dynasty:'唐', content:'三更三点万家眠，露欲为霜月堕烟。\n斗鼠上堂蝙蝠出，玉琴时动倚窗弦。' },
+  { title:'望喜驿别嘉陵江水', author:'李商隐', dynasty:'唐', content:'嘉陵江水此东流，望喜楼中忆阆州。\n若到阆中还赴海，阆州应更有高楼。' },
+  { title:'鄠杜马上念汉书', author:'李商隐', dynasty:'唐', content:'世上苍龙种，人间武帝孙。\n小来惟射猎，兴罢得乾坤。\n渭水天开苑，咸阳地献原。\n英灵殊未已，丁傅渐华轩。' },
+  { title:'梓潼望长卿山至巴西复怀谯秀', author:'李商隐', dynasty:'唐', content:'梓潼不见马相如，更欲南行问酒垆。\n行到巴西觅谯秀，巴西惟是有寒芜。' },
+  { title:'东还', author:'李商隐', dynasty:'唐', content:'自有仙才自不知，十年长梦采华芝。\n秋风动地黄云暮，归去嵩阳寻旧师。' },
+  { title:'鸳鸯', author:'李商隐', dynasty:'唐', content:'雌去雄飞万里天，云罗满眼泪潸然。\n不须长结风波愿，锁向金笼始两全。' },
+  { title:'赠歌妓', author:'李商隐', dynasty:'唐', content:'水精如意玉连环，下蔡城危莫破颜。\n红绽樱桃含白雪，断肠声里唱阳关。' },
+  { title:'春雨', author:'李商隐', dynasty:'唐', content:'怅卧新春白袷衣，白门寥落意多违。\n红楼隔雨相望冷，珠箔飘灯独自归。\n远路应悲春晼晚，残霄犹得梦依稀。\n玉珰缄札何由达，万里云罗一雁飞。' },
+];
+
+// 验证诗词数量
+console.log(`📜 诗云词库已加载：${POEMS.length} 首经典诗词`);
+
+// ===================================================================
+//  三、全局状态变量
+// ===================================================================
+let scene, camera, renderer, composer, bloomPass;
+let nebulaGroup;               // 星云旋转父级容器
+let controls;                  // 轨道控制器
+let clock;                     // 时间时钟
+
+// 节点相关
+let instancedMesh;             // 实例化网格
+let scatteredPositions = [];   // 散开状态位置（Vector3数组）
+let gatheredPositions = [];    // 聚合状态位置（Vector3数组）
+let nodeColors = [];           // 每个节点颜色（THREE.Color数组）
+let floatParams = [];          // 每个节点漂浮参数 {speed, ampX, ampY, ampZ, phaseX, phaseY, phaseZ}
+
+// 连线相关
+let linkPairs = [];            // 连线对 [[idxA, idxB], ...]
+let linkDistances = [];        // 连线原始距离（用于透明度计算）
+let linkLines;                 // LineSegments对象
+let linkPositions;             // 连线顶点Float32Array（每帧更新）
+
+// 动画相关
+let isGathered = false;        // 当前是否处于聚合状态
+let isAnimating = false;       // 是否正在播放聚散动画
+let animStartTime = 0;         // 动画开始时间
+let animFromGathered = false;  // 动画起始状态
+
+// 诗词相关
+let poemPool = [];             // 剩余未抽取的诗词索引
+let nodePoemMap = new Map();   // 节点 → 诗词索引映射
+let poemOverlay;               // DOM弹出层
+let isPoemVisible = false;
+
+// 射线检测
+let raycaster;
+let mouse;
+
+// 粒子系统
+let starField;
+let dustParticles;
+let dustData = [];             // 尘埃粒子运动数据
+
+// 动画循环复用对象（避免每帧分配内存）
+const _matA = new THREE.Matrix4();
+const _matB = new THREE.Matrix4();
+const _posA = new THREE.Vector3();
+const _posB = new THREE.Vector3();
+
+// ---- 手势控制状态变量 ----
+let handGestureActive = false;    // 手势控制是否激活
+let handGestureStarting = false; // 防止重复调用的启动锁
+let handsInstance = null;         // MediaPipe Hands 实例
+let cameraStream = null;          // 摄像头媒体流
+let handRecognitionRAF = null;    // 手势识别循环ID
+let lastHandProcessTime = 0;      // 上次手势处理时间戳
+let lastHandDetectionTime = 0;    // 上次检测到手部的时间戳
+let handIdleCheckInterval = null; // 空闲检测定时器
+
+// 平滑后的手部控制值
+const handState = {
+  // 单手手掌 - 控制旋转
+  singlePalmX: 0.5,              // 平滑后手掌X (0~1, 镜像后)
+  singlePalmY: 0.5,              // 平滑后手掌Y (0~1)
+  hasSinglePalm: false,
+  // 双手手掌 - 控制缩放
+  palmDistance: null,            // 平滑后双掌距离
+  palmDistanceRef: null,         // 双掌首次检测时的参考距离
+  zoomRef: null,                 // 双掌检测时的参考相机距离
+  hasTwoPalms: false,
+  // 双手握拳 - 控制聚合
+  fistDistance: null,            // 平滑后双拳距离
+  fistDistanceRef: null,         // 双拳首次检测时的参考距离
+  hasTwoFists: false,
+  // 渲染循环使用的目标值
+  targetRotateY: null,           // 目标星云Y旋转
+  targetRotateX: null,           // 目标星云X旋转
+  targetZoom: null,              // 目标相机距离
+  targetGatherProgress: null,    // 目标聚合进度 (0=散开, 1=聚合)
+};
+
+// 手势识别临时变量（避免每帧分配）
+const _handSmoothPrev = { x: 0.5, y: 0.5, palmDist: null, fistDist: null };
+
+// ===================================================================
+//  四、工具函数
+// ===================================================================
+
+/** easeInOutCubic 缓动函数：动画开始和结束时平缓，中间加速 */
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+/** 在球体内生成随机点 */
+function randomSpherePoint(radius) {
+  const u = Math.random();
+  const v = Math.random();
+  const theta = 2 * Math.PI * u;
+  const phi = Math.acos(2 * v - 1);
+  const r = radius * Math.cbrt(Math.random());
+  return new THREE.Vector3(
+    r * Math.sin(phi) * Math.cos(theta),
+    r * Math.sin(phi) * Math.sin(theta),
+    r * Math.cos(phi)
+  );
+}
+
+/** 生成低饱和冷暖色：冷白/淡蓝/淡紫为主，少量鎏金点缀 */
+function generateNodeColor() {
+  const rand = Math.random();
+  let color;
+  if (rand < 0.35) {
+    // 冷白：偏蓝的白色
+    color = new THREE.Color().setHSL(0.58 + Math.random() * 0.12, 0.08 + Math.random() * 0.12, 0.82 + Math.random() * 0.18);
+  } else if (rand < 0.65) {
+    // 淡蓝：低饱和蓝
+    color = new THREE.Color().setHSL(0.55 + Math.random() * 0.08, 0.15 + Math.random() * 0.2, 0.65 + Math.random() * 0.3);
+  } else if (rand < 0.88) {
+    // 淡紫：低饱和紫
+    color = new THREE.Color().setHSL(0.72 + Math.random() * 0.1, 0.12 + Math.random() * 0.18, 0.68 + Math.random() * 0.28);
+  } else {
+    // 鎏金点缀
+    color = new THREE.Color().setHSL(0.12 + Math.random() * 0.04, 0.35 + Math.random() * 0.25, 0.55 + Math.random() * 0.35);
+  }
+  return color;
+}
+
+// ===================================================================
+//  四-B、手势识别模块（MediaPipe Hands）
+// ===================================================================
+
+/**
+ * 一阶低通滤波：平滑手部坐标消除抖动
+ * @param {number} current - 当前原始值
+ * @param {number} previous - 上次平滑值
+ * @param {number} factor - 平滑系数（0~1，越大越平滑）
+ */
+function lowPassFilter(current, previous, factor) {
+  if (previous === null || previous === undefined) return current;
+  return previous * factor + current * (1 - factor);
+}
+
+/**
+ * 判断手指是否伸直
+ * @param {Array} landmarks - 手部21个关键点
+ * @param {number} tipIdx - 指尖关键点索引
+ * @param {number} pipIdx - PIP关节索引
+ * @returns {boolean}
+ */
+function isFingerExtended(landmarks, tipIdx, pipIdx) {
+  // 指尖Y坐标小于PIP关节Y坐标 = 手指伸直（在图像坐标系中Y轴向下）
+  return landmarks[tipIdx].y < landmarks[pipIdx].y;
+}
+
+/**
+ * 手势分类：open（手掌张开）/ fist（握拳）/ unknown（未知）
+ * @param {Array} landmarks - 手部21个关键点
+ * @returns {string}
+ */
+function classifyHandGesture(landmarks) {
+  // 检查四指（食指、中指、无名指、小指）是否伸直
+  const indexUp = isFingerExtended(landmarks, 8, 6);   // 食指: TIP=8, PIP=6
+  const middleUp = isFingerExtended(landmarks, 12, 10); // 中指: TIP=12, PIP=10
+  const ringUp = isFingerExtended(landmarks, 16, 14);   // 无名指: TIP=16, PIP=14
+  const pinkyUp = isFingerExtended(landmarks, 20, 18);  // 小指: TIP=20, PIP=18
+
+  // 大拇指：检查拇指尖与食指MCP的相对位置
+  const thumbTip = landmarks[4];
+  const indexMcp = landmarks[5];
+  const thumbExtended = thumbTip.x < indexMcp.x ? // 简化的拇指判断
+    Math.abs(thumbTip.x - indexMcp.x) > 0.04 :
+    Math.abs(thumbTip.x - indexMcp.x) > 0.06;
+
+  const extendedCount = [indexUp, middleUp, ringUp, pinkyUp, thumbExtended]
+    .filter(Boolean).length;
+
+  if (extendedCount >= 4) return 'open';   // 手掌张开（至少4指伸直）
+  if (extendedCount <= 1) return 'fist';   // 握拳（最多1指伸直）
+  return 'unknown';
+}
+
+/**
+ * 获取手掌中心坐标（所有关键点平均值，归一化0~1）
+ */
+function getPalmCenter(landmarks) {
+  let sumX = 0, sumY = 0;
+  for (const lm of landmarks) {
+    sumX += lm.x;
+    sumY += lm.y;
+  }
+  return { x: sumX / 21, y: sumY / 21 };
+}
+
+/**
+ * 处理MediaPipe Hands识别结果
+ * @param {Object} results - MediaPipe onResults回调参数
+ */
+function processHandResults(results) {
+  // 手势控制已关闭时忽略异步回调（防止竞态）
+  if (!handGestureActive) return;
+
+  const now = performance.now();
+  const sf = CONFIG.handSmoothFactor;
+  const confThreshold = CONFIG.handConfidenceThreshold;
+
+  // 重置当前帧状态
+  handState.hasSinglePalm = false;
+  handState.hasTwoPalms = false;
+  handState.hasTwoFists = false;
+
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    // 无手部检测 → 清除所有目标值
+    handState.targetRotateY = null;
+    handState.targetRotateX = null;
+    handState.targetZoom = null;
+    handState.targetGatherProgress = null;
+    updateGestureIndicator('');
+    return;
+  }
+
+  // 记录最后检测时间
+  lastHandDetectionTime = now;
+
+  const hands = results.multiHandLandmarks;
+  const handedness = results.multiHandedness || [];
+
+  // ---- 单手掌：分类并处理 ----
+  if (hands.length === 1) {
+    const gesture = classifyHandGesture(hands[0]);
+    const palm = getPalmCenter(hands[0]);
+
+    if (gesture === 'open') {
+      // 单手张开 → 控制旋转
+      handState.hasSinglePalm = true;
+
+      // 低通滤波平滑手掌坐标
+      handState.singlePalmX = lowPassFilter(palm.x, _handSmoothPrev.x, sf);
+      handState.singlePalmY = lowPassFilter(palm.y, _handSmoothPrev.y, sf);
+      _handSmoothPrev.x = handState.singlePalmX;
+      _handSmoothPrev.y = handState.singlePalmY;
+
+      // 映射到旋转角度：手掌中心偏移 → 旋转角度
+      // X: 0~1 → 左到右 → Y轴旋转（0.5=不转, <0.5=左转, >0.5=右转）
+      const maxAngle = Math.PI * 1.2; // 最大旋转角度范围
+      handState.targetRotateY = (0.5 - handState.singlePalmX) * maxAngle * CONFIG.handRotateSensitivity;
+      handState.targetRotateX = (0.5 - handState.singlePalmY) * maxAngle * 0.6 * CONFIG.handRotateSensitivity;
+
+      // 清除双手控制
+      handState.targetZoom = null;
+      handState.targetGatherProgress = null;
+      handState.palmDistanceRef = null;
+      handState.fistDistanceRef = null;
+
+      // 显示手势名称
+      updateGestureIndicator('🖐️ 单手旋转');
+
+    } else {
+      // 单手非张开 → 清除所有控制
+      handState.targetRotateY = null;
+      handState.targetRotateX = null;
+      handState.targetZoom = null;
+      handState.targetGatherProgress = null;
+      updateGestureIndicator('');
+    }
+    return;
+  }
+
+  // ---- 双手掌：分类两只手 ----
+  if (hands.length === 2) {
+    const gesture0 = classifyHandGesture(hands[0]);
+    const gesture1 = classifyHandGesture(hands[1]);
+
+    // 情况1：双手都张开 → 控制缩放
+    if (gesture0 === 'open' && gesture1 === 'open') {
+      handState.hasTwoPalms = true;
+
+      const palm0 = getPalmCenter(hands[0]);
+      const palm1 = getPalmCenter(hands[1]);
+
+      // 计算双掌欧氏距离（归一化坐标空间 0~1）
+      const rawDist = Math.sqrt(
+        (palm0.x - palm1.x) ** 2 + (palm0.y - palm1.y) ** 2
+      );
+
+      // 低通滤波平滑距离
+      handState.palmDistance = lowPassFilter(rawDist, _handSmoothPrev.palmDist, sf);
+      _handSmoothPrev.palmDist = handState.palmDistance;
+
+      // 首次检测时记录参考距离和相机距离
+      if (handState.palmDistanceRef === null) {
+        handState.palmDistanceRef = handState.palmDistance;
+        handState.zoomRef = camera.position.distanceTo(controls.target);
+      }
+
+      // 距离比例映射相机距离：距离变大 → 相机变远（缩小）
+      const ratio = handState.palmDistance / handState.palmDistanceRef;
+      const targetDist = handState.zoomRef / Math.max(ratio, 0.2) * CONFIG.handZoomSensitivity;
+      handState.targetZoom = THREE.MathUtils.clamp(targetDist, controls.minDistance, controls.maxDistance);
+
+      // 清除其他控制
+      handState.targetRotateY = null;
+      handState.targetRotateX = null;
+      handState.targetGatherProgress = null;
+      handState.fistDistanceRef = null;
+
+      updateGestureIndicator('🤲 双手缩放');
+
+    // 情况2：双手都握拳 → 控制聚合度
+    } else if (gesture0 === 'fist' && gesture1 === 'fist') {
+      handState.hasTwoFists = true;
+
+      const palm0 = getPalmCenter(hands[0]);
+      const palm1 = getPalmCenter(hands[1]);
+
+      const rawDist = Math.sqrt(
+        (palm0.x - palm1.x) ** 2 + (palm0.y - palm1.y) ** 2
+      );
+
+      handState.fistDistance = lowPassFilter(rawDist, _handSmoothPrev.fistDist, sf);
+      _handSmoothPrev.fistDist = handState.fistDistance;
+
+      // 首次检测时记录参考距离
+      if (handState.fistDistanceRef === null) {
+        handState.fistDistanceRef = handState.fistDistance;
+      }
+
+      // 双拳距离映射聚合度：
+      //   拳距离小 → 聚合度高（接近1）
+      //   拳距离大 → 聚合度低（接近0）
+      // 以参考距离为中点，0.5倍参考距离=完全聚合，2倍参考距离=完全散开
+      const minDist = handState.fistDistanceRef * 0.3;
+      const maxDist = handState.fistDistanceRef * 2.0;
+      const clampedDist = THREE.MathUtils.clamp(handState.fistDistance, minDist, maxDist);
+      const progress = 1.0 - (clampedDist - minDist) / (maxDist - minDist);
+      handState.targetGatherProgress = THREE.MathUtils.clamp(
+        progress * CONFIG.handGatherSensitivity, 0.0, 1.0
+      );
+
+      // 清除其他控制
+      handState.targetRotateY = null;
+      handState.targetRotateX = null;
+      handState.targetZoom = null;
+      handState.palmDistanceRef = null;
+
+      updateGestureIndicator('✊ 双拳聚合');
+
+    } else {
+      // 双手不同手势 → 清除所有控制
+      handState.targetRotateY = null;
+      handState.targetRotateX = null;
+      handState.targetZoom = null;
+      handState.targetGatherProgress = null;
+      handState.palmDistanceRef = null;
+      handState.fistDistanceRef = null;
+      updateGestureIndicator('');
+    }
+  }
+}
+
+/** 更新手势状态指示器 */
+function updateGestureIndicator(text) {
+  const indicator = document.getElementById('gesture-indicator');
+  if (!indicator) return;
+  if (text) {
+    indicator.textContent = text;
+    indicator.classList.add('visible');
+  } else {
+    indicator.classList.remove('visible');
+  }
+}
+
+/** 启动摄像头与手势识别 */
+async function startHandGesture() {
+  console.log('🖐️ startHandGesture() 被调用');
+  // 防止重复调用（竞态保护）
+  if (handGestureStarting || handGestureActive) {
+    console.log('🖐️ 启动被阻止: starting=' + handGestureStarting + ', active=' + handGestureActive);
+    return;
+  }
+  handGestureStarting = true;
+
+  const videoEl = document.getElementById('camera-video');
+  const previewEl = document.getElementById('camera-preview');
+  const btnEl = document.getElementById('hand-control-btn');
+  const deniedEl = document.getElementById('permission-denied');
+
+  // 检查MediaPipe Hands是否可用
+  if (typeof window.Hands === 'undefined') {
+    console.warn('⚠️ MediaPipe Hands 库未加载，手势控制不可用');
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⚠️ 手势库未加载'; }
+    handGestureStarting = false;
+    return;
+  }
+
+  // 检查摄像头API是否可用
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    console.warn('⚠️ 浏览器不支持摄像头API');
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⚠️ 摄像头不可用'; }
+    handGestureStarting = false;
+    return;
+  }
+
+  try {
+    // 申请摄像头权限
+    console.log('🖐️ [1/5] 正在请求摄像头权限...');
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480, facingMode: 'user' },
+      audio: false
+    });
+    console.log('🖐️ [2/5] 摄像头已授权，视频流就绪');
+
+    videoEl.srcObject = cameraStream;
+    await videoEl.play();
+    console.log('🖐️ [3/5] 视频播放已开始, 尺寸:', videoEl.videoWidth, 'x', videoEl.videoHeight);
+
+    // 显示摄像头预览
+    if (CONFIG.showCameraPreview && previewEl) {
+      previewEl.classList.add('visible');
+    }
+
+    // 创建MediaPipe Hands实例（从本地加载模型文件，无需CDN）
+    const Hands = window.Hands;
+    handsInstance = new Hands({
+      locateFile: (file) => {
+        // 去掉可能的前缀路径（如 wasm/xxx → xxx）
+        const basename = file.includes('/') ? file.split('/').pop() : file;
+        return `mediapipe_hands/package/${basename}`;
+      }
+    });
+
+    handsInstance.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,              // 模型复杂度（0=Lite, 1=Full）
+      minDetectionConfidence: CONFIG.handConfidenceThreshold,
+      minTrackingConfidence: 0.5
+    });
+
+    // 设置结果回调
+    handsInstance.onResults((results) => {
+      processHandResults(results);
+    });
+
+    // 初始化MediaPipe Hands（加载模型），加 15 秒超时保护
+    console.log('🖐️ [4/5] 正在加载 MediaPipe 模型（CDN加载WASM...）');
+    const initTimeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('模型加载超时（15秒），请检查网络/CDN是否可达')), 15000)
+    );
+    await Promise.race([handsInstance.initialize(), initTimeout]);
+    console.log('🖐️ [5/5] 模型加载完成，启动识别循环');
+
+    // 启动独立的识别循环（30FPS）
+    handGestureActive = true;
+    CONFIG.handGestureEnabled = true;
+    lastHandProcessTime = performance.now();
+    lastHandDetectionTime = performance.now();
+
+    // 启动空闲检测定时器
+    startIdleCheck();
+
+    // 独立识别循环
+    function recognitionLoop() {
+      if (!handGestureActive) return;
+
+      const now = performance.now();
+      const interval = 1000 / CONFIG.handRecognitionFPS;
+
+      if (now - lastHandProcessTime >= interval && videoEl.readyState >= 2 && videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
+        lastHandProcessTime = now;
+        // 发送视频帧到MediaPipe进行手部识别
+        handsInstance.send({ image: videoEl }).catch((err) => {
+          console.warn('🖐️ MediaPipe send() 出错:', err?.message || err);
+        });
+      }
+
+      handRecognitionRAF = requestAnimationFrame(recognitionLoop);
+    }
+    handRecognitionRAF = requestAnimationFrame(recognitionLoop);
+
+    // 更新按钮状态
+    if (btnEl) {
+      btnEl.textContent = '🖐️ 关闭手势控制';
+      btnEl.classList.add('active');
+    }
+
+    console.log('🖐️ 手势控制已启动（识别@30FPS，独立于3D渲染循环）');
+    handGestureStarting = false;
+
+  } catch (err) {
+    console.warn('⚠️ 摄像头权限被拒绝或出错:', err.message);
+    handGestureStarting = false;
+    // 显示友好提示
+    if (deniedEl) deniedEl.classList.add('visible');
+    if (btnEl) {
+      btnEl.textContent = '⚠️ 摄像头被拒绝';
+      btnEl.disabled = true;
+    }
+    // 降级为键鼠模式（原有功能不受影响）
+    handGestureActive = false;
+    CONFIG.handGestureEnabled = false;
+  }
+}
+
+/** 关闭手势识别 */
+function stopHandGesture() {
+  handGestureActive = false;
+  CONFIG.handGestureEnabled = false;
+
+  // 取消识别循环
+  if (handRecognitionRAF) {
+    cancelAnimationFrame(handRecognitionRAF);
+    handRecognitionRAF = null;
+  }
+
+  // 停止空闲检测
+  if (handIdleCheckInterval) {
+    clearInterval(handIdleCheckInterval);
+    handIdleCheckInterval = null;
+  }
+
+  // 关闭摄像头
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+    cameraStream = null;
+  }
+
+  // 清理MediaPipe实例
+  if (handsInstance) {
+    handsInstance.close();
+    handsInstance = null;
+  }
+
+  // 隐藏预览
+  const previewEl = document.getElementById('camera-preview');
+  if (previewEl) previewEl.classList.remove('visible');
+
+  // 清除视频源
+  const videoEl = document.getElementById('camera-video');
+  if (videoEl) videoEl.srcObject = null;
+
+  // 重置所有控制状态
+  handState.targetRotateY = null;
+  handState.targetRotateX = null;
+  handState.targetZoom = null;
+  handState.targetGatherProgress = null;
+  handState.palmDistanceRef = null;
+  handState.fistDistanceRef = null;
+  handState.hasSinglePalm = false;
+  handState.hasTwoPalms = false;
+  handState.hasTwoFists = false;
+  _handSmoothPrev.x = 0.5;
+  _handSmoothPrev.y = 0.5;
+  _handSmoothPrev.palmDist = null;
+  _handSmoothPrev.fistDist = null;
+
+  updateGestureIndicator('');
+
+  // 更新按钮状态
+  const btnEl = document.getElementById('hand-control-btn');
+  if (btnEl) {
+    btnEl.textContent = '🖐️ 启动手势控制';
+    btnEl.classList.remove('active');
+    btnEl.disabled = false;
+  }
+
+  console.log('🖐️ 手势控制已关闭，恢复键鼠交互');
+}
+
+/** 空闲检测：超2秒无手部则暂停识别以降低功耗 */
+function startIdleCheck() {
+  if (handIdleCheckInterval) clearInterval(handIdleCheckInterval);
+  handIdleCheckInterval = setInterval(() => {
+    if (!handGestureActive) return;
+    const now = performance.now();
+    if (now - lastHandDetectionTime > CONFIG.handIdleTimeout) {
+      // 超时未检测到手部，暂停发送帧到MediaPipe（降低CPU消耗）
+      // 注：识别循环仍在运行但send频率降低到2FPS以保持唤醒
+      lastHandProcessTime = now - (1000 / CONFIG.handRecognitionFPS) + (1000 / 2);
+    }
+  }, 1000);
+}
+
+/** 初始化手势控制按钮事件 */
+function setupHandGestureUI() {
+  const btnEl = document.getElementById('hand-control-btn');
+  if (!btnEl) return;
+
+  console.log('🖐️ setupHandGestureUI() 执行中...');
+  console.log('   window.Hands:', typeof window.Hands);
+  console.log('   navigator.mediaDevices:', !!navigator.mediaDevices);
+  console.log('   getUserMedia:', !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+
+  // 检查浏览器兼容性
+  const isCompatible = typeof window.Hands !== 'undefined' &&
+    navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+
+  if (!isCompatible) {
+    btnEl.disabled = true;
+    btnEl.textContent = '⚠️ 环境不支持手势控制';
+    btnEl.style.opacity = '0.5';
+    btnEl.style.cursor = 'not-allowed';
+    btnEl.title = '您的浏览器不支持MediaPipe Hands或摄像头API';
+    return;
+  }
+
+  // 点击切换启动/关闭
+  btnEl.addEventListener('click', () => {
+    console.log('🖐️ 按钮被点击！handGestureActive=' + handGestureActive + ', handGestureStarting=' + handGestureStarting);
+    if (handGestureStarting) return; // 正在启动中，忽略点击
+    if (handGestureActive) {
+      stopHandGesture();
+    } else {
+      startHandGesture();
+    }
+  });
+}
+
+// ===================================================================
+//  五、场景初始化
+// ===================================================================
+function initScene() {
+  // --- 渲染器 ---
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 限制像素比保证性能
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ReinhardToneMapping;
+  renderer.toneMappingExposure = 1.2;
+  document.body.appendChild(renderer.domElement);
+
+  // --- 场景 ---
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x000000);
+  scene.fog = new THREE.FogExp2(0x000000, 0.00015); // 远处微雾增强纵深感
+
+  // --- 相机 ---
+  camera = new THREE.PerspectiveCamera(
+    CONFIG.cameraFov,
+    window.innerWidth / window.innerHeight,
+    CONFIG.cameraNear,
+    CONFIG.cameraFar
+  );
+  camera.position.set(0, 4, CONFIG.cameraInitZ);
+  camera.lookAt(0, 0, 0);
+
+  // --- 轨道控制器 ---
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 4;
+  controls.maxDistance = 70;
+  controls.target.set(0, 0, 0);
+  controls.autoRotate = false;
+  controls.update();
+
+  // --- 星云旋转容器 ---
+  nebulaGroup = new THREE.Group();
+  scene.add(nebulaGroup);
+
+  // --- 时钟 ---
+  clock = new THREE.Clock();
+
+  console.log('🌌 场景初始化完成');
+}
+
+// ===================================================================
+//  六、后期处理（泛光Bloom）
+// ===================================================================
+function initPostProcessing() {
+  const renderPass = new RenderPass(scene, camera);
+  renderPass.clearAlpha = 1;
+
+  bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    CONFIG.bloomIntensity,
+    CONFIG.bloomRadius,
+    CONFIG.bloomThreshold
+  );
+
+  composer = new EffectComposer(renderer);
+  composer.addPass(renderPass);
+  composer.addPass(bloomPass);
+
+  console.log('✨ 泛光后期处理初始化完成');
+}
+
+// ===================================================================
+//  七、创建节点系统（InstancedMesh实例化渲染）
+// ===================================================================
+function createNodes() {
+  const count = CONFIG.nodeCount;
+  const geometry = new THREE.SphereGeometry(CONFIG.nodeSize, 16, 16);
+
+  // 使用自发光材质（MeshBasicMaterial不受场景光照影响，天然自发光）
+  const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+  instancedMesh = new THREE.InstancedMesh(geometry, material, count);
+  instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); // 每帧更新矩阵
+
+  // 临时矩阵用于设置每个实例
+  const dummy = new THREE.Object3D();
+  const color = new THREE.Color();
+
+  for (let i = 0; i < count; i++) {
+    // 生成散开位置（球体内随机分布）
+    const pos = randomSpherePoint(CONFIG.scatterRadius);
+    scatteredPositions.push(pos.clone());
+
+    // 生成聚合位置（小半径球体内致密分布）
+    const gatheredPos = randomSpherePoint(CONFIG.gatherRadius);
+    gatheredPositions.push(gatheredPos);
+
+    // 初始位置设为散开位置
+    dummy.position.copy(pos);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    instancedMesh.setMatrixAt(i, dummy.matrix);
+
+    // 生成节点颜色
+    const nodeColor = generateNodeColor();
+    nodeColors.push(nodeColor);
+    instancedMesh.setColorAt(i, nodeColor);
+
+    // 生成漂浮参数
+    floatParams.push({
+      speed: CONFIG.floatFrequency * (0.5 + Math.random() * 1.5),
+      ampX: CONFIG.floatAmplitude * (0.3 + Math.random() * 1.0),
+      ampY: CONFIG.floatAmplitude * (0.3 + Math.random() * 1.0),
+      ampZ: CONFIG.floatAmplitude * (0.3 + Math.random() * 1.0),
+      phaseX: Math.random() * Math.PI * 2,
+      phaseY: Math.random() * Math.PI * 2,
+      phaseZ: Math.random() * Math.PI * 2,
+    });
+  }
+
+  instancedMesh.instanceMatrix.needsUpdate = true;
+  if (instancedMesh.instanceColor) instancedMesh.instanceColor.needsUpdate = true;
+
+  nebulaGroup.add(instancedMesh);
+  console.log(`🔮 ${count} 个节点已创建（InstancedMesh）`);
+}
+
+// ===================================================================
+//  八、创建连线系统（LineSegments批量渲染）
+// ===================================================================
+function createLinks() {
+  const count = CONFIG.nodeCount;
+  const maxDist = CONFIG.linkMaxDistance;
+
+  // 第一步：计算连线（根据节点数量自动选择算法）
+  linkPairs = [];
+  linkDistances = [];
+
+  if (CONFIG.spatialGridEnabled && count > 500) {
+    // 大型场景：空间网格加速 O(n·k)
+    const result = computeLinksSpatial(scatteredPositions, maxDist);
+    linkPairs = result.pairs;
+    linkDistances = result.distances;
+  } else {
+    // 小型场景：朴素 O(n²) 更简单直接
+    for (let i = 0; i < count; i++) {
+      for (let j = i + 1; j < count; j++) {
+        const dist = scatteredPositions[i].distanceTo(scatteredPositions[j]);
+        if (dist < maxDist) {
+          linkPairs.push([i, j]);
+          linkDistances.push(dist);
+        }
+      }
+    }
+  }
+
+  const linkCount = linkPairs.length;
+  console.log(`🔗 ${linkCount} 条连线已建立（距离阈值: ${maxDist}）`);
+
+  if (linkCount === 0) {
+    // 无连线时创建空几何体
+    const emptyGeo = new THREE.BufferGeometry();
+    emptyGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+    const linkMat = new THREE.LineBasicMaterial({ visible: false });
+    linkLines = new THREE.LineSegments(emptyGeo, linkMat);
+    nebulaGroup.add(linkLines);
+    linkPositions = new Float32Array(0);
+    return;
+  }
+
+  // 第二步：创建连线几何体
+  linkPositions = new Float32Array(linkCount * 2 * 3); // 每条线段2个顶点
+  const linkColorsArr = new Float32Array(linkCount * 2 * 3); // 顶点颜色
+
+  const baseLinkColor = new THREE.Color(CONFIG.linkColor);
+
+  // 初始化连线位置（基于散开位置）
+  for (let k = 0; k < linkCount; k++) {
+    const [i, j] = linkPairs[k];
+    const posA = scatteredPositions[i];
+    const posB = scatteredPositions[j];
+    const dist = linkDistances[k];
+
+    // 位置
+    const baseIdx = k * 6;
+    linkPositions[baseIdx] = posA.x;
+    linkPositions[baseIdx + 1] = posA.y;
+    linkPositions[baseIdx + 2] = posA.z;
+    linkPositions[baseIdx + 3] = posB.x;
+    linkPositions[baseIdx + 4] = posB.y;
+    linkPositions[baseIdx + 5] = posB.z;
+
+    // 顶点颜色：距离越远越暗（模拟透明度变化）
+    const alpha = 1.0 - (dist / maxDist); // 0~1，近亮远暗
+    const dimColor = baseLinkColor.clone().multiplyScalar(0.3 + alpha * 0.7);
+
+    linkColorsArr[baseIdx] = dimColor.r;
+    linkColorsArr[baseIdx + 1] = dimColor.g;
+    linkColorsArr[baseIdx + 2] = dimColor.b;
+    linkColorsArr[baseIdx + 3] = dimColor.r;
+    linkColorsArr[baseIdx + 4] = dimColor.g;
+    linkColorsArr[baseIdx + 5] = dimColor.b;
+  }
+
+  const linkGeo = new THREE.BufferGeometry();
+  linkGeo.setAttribute('position', new THREE.BufferAttribute(linkPositions, 3));
+  linkGeo.setAttribute('color', new THREE.BufferAttribute(linkColorsArr, 3));
+
+  const linkMat = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: CONFIG.linkBaseOpacity,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+
+  linkLines = new THREE.LineSegments(linkGeo, linkMat);
+  nebulaGroup.add(linkLines);
+}
+
+// ---- 空间网格加速连线计算 ----
+
+/**
+ * 构建空间哈希网格用于加速邻近节点查询
+ * @param {THREE.Vector3[]} positions - 节点位置数组
+ * @param {number} cellSize - 网格单元大小（通常=linkMaxDistance）
+ * @returns {Map<number, number[]>} cellKey → 节点索引数组
+ */
+function buildSpatialGrid(positions, cellSize) {
+  const grid = new Map();
+  for (let i = 0; i < positions.length; i++) {
+    const p = positions[i];
+    const cx = Math.floor(p.x / cellSize);
+    const cy = Math.floor(p.y / cellSize);
+    const cz = Math.floor(p.z / cellSize);
+    // 打包为32位整数key（10bits per dim, signed offset）
+    const key = ((cx & 0x3FF) << 20) | ((cy & 0x3FF) << 10) | (cz & 0x3FF);
+    if (!grid.has(key)) grid.set(key, []);
+    grid.get(key).push(i);
+  }
+  return grid;
+}
+
+/**
+ * 空间网格加速连线计算：仅检查相邻网格单元的节点对
+ * 复杂度 O(n·k)，k=每个单元的邻居节点数
+ */
+function computeLinksSpatial(positions, maxDist) {
+  const grid = buildSpatialGrid(positions, maxDist);
+  const pairs = [];
+  const distances = [];
+
+  for (const [key, indices] of grid) {
+    const cx = (key >> 20) & 0x3FF;
+    const cy = (key >> 10) & 0x3FF;
+    const cz = key & 0x3FF;
+
+    for (const i of indices) {
+      // 检查当前单元及26个相邻单元
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dz = -1; dz <= 1; dz++) {
+            const nKey = (((cx + dx) & 0x3FF) << 20) | (((cy + dy) & 0x3FF) << 10) | ((cz + dz) & 0x3FF);
+            const neighbors = grid.get(nKey);
+            if (!neighbors) continue;
+            for (const j of neighbors) {
+              if (i >= j) continue; // 避免重复和自对
+              const dist = positions[i].distanceTo(positions[j]);
+              if (dist < maxDist) {
+                pairs.push([i, j]);
+                distances.push(dist);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return { pairs, distances };
+}
+
+// ---- 节点系统重建（滑块触发） ----
+
+let rebuildDebounceTimer = null;
+
+/**
+ * 重建节点系统：滑块改变节点数量时调用
+ * 防抖处理，避免滑块拖拽过程中频繁重建
+ */
+function rebuildNodeSystem(newCount) {
+  // 清除旧的防抖定时器
+  if (rebuildDebounceTimer) clearTimeout(rebuildDebounceTimer);
+
+  rebuildDebounceTimer = setTimeout(() => {
+    const oldCount = CONFIG.nodeCount;
+    if (newCount === oldCount) return;
+
+    console.log(`🔧 重建节点系统：${oldCount} → ${newCount}`);
+    const startTime = performance.now();
+
+    // 1. 暂停聚散动画
+    isAnimating = false;
+
+    // 2. 清理旧连线
+    if (linkLines) {
+      linkLines.geometry.dispose();
+      linkLines.material.dispose();
+      nebulaGroup.remove(linkLines);
+      linkLines = null;
+    }
+    linkPairs = [];
+    linkDistances = [];
+    linkPositions = new Float32Array(0);
+
+    // 3. 清理旧节点（InstancedMesh）
+    if (instancedMesh) {
+      instancedMesh.geometry.dispose();
+      instancedMesh.material.dispose();
+      nebulaGroup.remove(instancedMesh);
+      instancedMesh = null;
+    }
+
+    // 4. 更新节点数量
+    CONFIG.nodeCount = newCount;
+
+    // 5. 重新生成位置和颜色数据
+    scatteredPositions = [];
+    gatheredPositions = [];
+    nodeColors = [];
+    floatParams = [];
+
+    for (let i = 0; i < newCount; i++) {
+      const pos = randomSpherePoint(CONFIG.scatterRadius);
+      scatteredPositions.push(pos.clone());
+      gatheredPositions.push(randomSpherePoint(CONFIG.gatherRadius));
+      nodeColors.push(generateNodeColor());
+      floatParams.push({
+        speed: CONFIG.floatFrequency * (0.5 + Math.random() * 1.5),
+        ampX: CONFIG.floatAmplitude * (0.3 + Math.random() * 1.0),
+        ampY: CONFIG.floatAmplitude * (0.3 + Math.random() * 1.0),
+        ampZ: CONFIG.floatAmplitude * (0.3 + Math.random() * 1.0),
+        phaseX: Math.random() * Math.PI * 2,
+        phaseY: Math.random() * Math.PI * 2,
+        phaseZ: Math.random() * Math.PI * 2,
+      });
+    }
+
+    // 6. 重建 InstancedMesh
+    const geometry = new THREE.SphereGeometry(CONFIG.nodeSize, 16, 16);
+    const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    instancedMesh = new THREE.InstancedMesh(geometry, material, newCount);
+    instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < newCount; i++) {
+      dummy.position.copy(scatteredPositions[i]);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      instancedMesh.setMatrixAt(i, dummy.matrix);
+      instancedMesh.setColorAt(i, nodeColors[i]);
+    }
+    instancedMesh.instanceMatrix.needsUpdate = true;
+    if (instancedMesh.instanceColor) instancedMesh.instanceColor.needsUpdate = true;
+    nebulaGroup.add(instancedMesh);
+
+    // 7. 重建连线
+    createLinks();
+
+    // 8. 重置诗词映射（节点索引变了）
+    nodePoemMap.clear();
+    poemPool = Array.from({ length: POEMS.length }, (_, i) => i);
+    for (let i = poemPool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [poemPool[i], poemPool[j]] = [poemPool[j], poemPool[i]];
+    }
+
+    // 9. 重置聚合状态为散开
+    isGathered = false;
+
+    const elapsed = performance.now() - startTime;
+    console.log(`✅ 节点系统重建完成（${newCount}节点, ${linkPairs.length}连线, 耗时${elapsed.toFixed(1)}ms）`);
+    updateNodeCountDisplay(newCount);
+
+  }, CONFIG.sliderDebounceMs);
+}
+
+/** 更新滑块数字显示 */
+function updateNodeCountDisplay(count) {
+  const display = document.getElementById('node-count-display');
+  if (display) display.textContent = count;
+}
+
+/** 初始化节点数量滑块事件 */
+function setupNodeSlider() {
+  const slider = document.getElementById('node-slider');
+  if (!slider) return;
+
+  slider.min = CONFIG.nodeCountMin;
+  slider.max = CONFIG.nodeCountMax;
+  slider.value = CONFIG.nodeCount;
+
+  slider.addEventListener('input', () => {
+    const newCount = parseInt(slider.value);
+    updateNodeCountDisplay(newCount);
+    rebuildNodeSystem(newCount);
+  });
+
+  updateNodeCountDisplay(CONFIG.nodeCount);
+}
+
+// ===================================================================
+//  九、创建背景星光粒子
+// ===================================================================
+function createStarfield() {
+  const count = CONFIG.starCount;
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+
+  // 星光分布在大型球壳上，作为远景
+  const starRadius = 50;
+  for (let i = 0; i < count; i++) {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const r = starRadius * (0.7 + Math.random() * 0.3);
+
+    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+    positions[i * 3 + 2] = r * Math.cos(phi);
+
+    // 星光颜色：大部分白色，少量带微蓝或微金
+    const hueRand = Math.random();
+    let starColor;
+    if (hueRand < 0.7) {
+      starColor = new THREE.Color().setHSL(0, 0, 0.7 + Math.random() * 0.3);
+    } else if (hueRand < 0.9) {
+      starColor = new THREE.Color().setHSL(0.58, 0.1, 0.7 + Math.random() * 0.3);
+    } else {
+      starColor = new THREE.Color().setHSL(0.13, 0.2, 0.7 + Math.random() * 0.3);
+    }
+    colors[i * 3] = starColor.r;
+    colors[i * 3 + 1] = starColor.g;
+    colors[i * 3 + 2] = starColor.b;
+  }
+
+  const starsGeo = new THREE.BufferGeometry();
+  starsGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  starsGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+  const starsMat = new THREE.PointsMaterial({
+    size: 0.12,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.75,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+
+  starField = new THREE.Points(starsGeo, starsMat);
+  scene.add(starField); // 不加入星云组，保持独立背景
+  console.log(`⭐ ${count} 颗背景星光粒子已创建`);
+}
+
+// ===================================================================
+//  十、创建宇宙尘埃粒子系统
+// ===================================================================
+function createDustParticles() {
+  const count = CONFIG.dustCount;
+  const positions = new Float32Array(count * 3);
+  const spread = CONFIG.dustSpread;
+
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = (Math.random() - 0.5) * spread;
+    positions[i * 3 + 1] = (Math.random() - 0.5) * spread * 0.7;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * spread;
+
+    // 存储运动数据
+    dustData.push({
+      baseX: positions[i * 3],
+      baseY: positions[i * 3 + 1],
+      baseZ: positions[i * 3 + 2],
+      speedX: (Math.random() - 0.5) * 0.015,
+      speedY: (Math.random() - 0.5) * 0.01,
+      speedZ: (Math.random() - 0.5) * 0.015,
+      phase: Math.random() * Math.PI * 2,
+      amplitude: 0.5 + Math.random() * 2.5,
+    });
+  }
+
+  const dustGeo = new THREE.BufferGeometry();
+  dustGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+  const dustMat = new THREE.PointsMaterial({
+    size: 0.06,
+    color: 0xccccdd,
+    transparent: true,
+    opacity: 0.4,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+
+  dustParticles = new THREE.Points(dustGeo, dustMat);
+  scene.add(dustParticles); // 不加入星云组，保持独立飘移
+  console.log(`💫 ${count} 颗宇宙尘埃粒子已创建`);
+}
+
+// ===================================================================
+//  十一、诗词弹出系统 — 古风质感 + 炫酷动效
+// ===================================================================
+let poemExitCallback = null;  // 退场完成后的回调
+
+function setupPoemOverlay() {
+  poemOverlay = document.getElementById('poem-overlay');
+
+  // 初始化诗词池（Fisher-Yates洗牌）
+  poemPool = Array.from({ length: POEMS.length }, (_, i) => i);
+  for (let i = poemPool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [poemPool[i], poemPool[j]] = [poemPool[j], poemPool[i]];
+  }
+
+  // 应用排版模式
+  applyLayoutMode();
+
+  // 点击诗词浮层空白处关闭（带消散动效）
+  poemOverlay.addEventListener('click', (e) => {
+    e.stopPropagation();
+    hidePoem();
+  });
+
+  // 印章显示控制
+  updateSealVisibility();
+}
+
+/** 应用排版模式 */
+function applyLayoutMode() {
+  if (!poemOverlay) return;
+  if (CONFIG.poemLayout === 'vertical') {
+    poemOverlay.classList.add('layout-vertical');
+  } else {
+    poemOverlay.classList.remove('layout-vertical');
+  }
+}
+
+/** 更新印章可见性 */
+function updateSealVisibility() {
+  const seal = poemOverlay?.querySelector('.poem-seal');
+  if (seal) seal.style.display = CONFIG.poemSealEnabled ? '' : 'none';
+}
+
+/** 逐字构建动画span，返回总字符数 */
+function buildCharacterSpans(containerEl, text, startDelaySec) {
+  containerEl.innerHTML = '';
+  let charIndex = 0;
+  const interval = CONFIG.poemCharacterInterval;
+
+  const lines = text.split('\n');
+  for (const line of lines) {
+    const lineDiv = document.createElement('div');
+    lineDiv.className = 'poem-line';
+    for (const ch of line) {
+      const span = document.createElement('span');
+      span.className = 'poem-char';
+      if (ch === ' ') span.classList.add('space');
+      span.textContent = ch;
+      span.style.animationDelay = `${startDelaySec + charIndex * interval}s`;
+      charIndex++;
+      lineDiv.appendChild(span);
+    }
+    containerEl.appendChild(lineDiv);
+  }
+  return charIndex;
+}
+
+/** 清除字符span */
+function clearCharacterSpans() {
+  if (!poemOverlay) return;
+  ['poem-title', 'poem-author', 'poem-content'].forEach(cls => {
+    const el = poemOverlay.querySelector('.' + cls);
+    if (el) el.innerHTML = '';
+  });
+}
+
+/** 显示指定索引的诗词（带入场凝聚动画） */
+function showPoem(poemIndex) {
+  if (isPoemVisible) {
+    hidePoemWithAnimation(() => showPoemInternal(poemIndex));
+    return;
+  }
+  showPoemInternal(poemIndex);
+}
+
+function showPoemInternal(poemIndex) {
+  const poem = POEMS[poemIndex];
+  if (!poem) return;
+
+  applyLayoutMode();
+  updateSealVisibility();
+
+  // 清除退场态，进入可见态（CSS class 管理动画，无 inline style 冲突）
+  poemOverlay.classList.remove('exiting', 'floating');
+  void poemOverlay.offsetWidth; // 强制回流，确保动画重置
+
+  // 构建标题、作者、正文的逐字span
+  const titleEl = poemOverlay.querySelector('.poem-title');
+  const titleChars = buildCharacterSpans(titleEl, `《${poem.title}》`, 0.05);
+
+  const authorEl = poemOverlay.querySelector('.poem-author');
+  const authorText = `${poem.dynasty} · ${poem.author}`;
+  const authorChars = buildCharacterSpans(authorEl, authorText, 0.05 + titleChars * CONFIG.poemCharacterInterval + 0.15);
+
+  const contentEl = poemOverlay.querySelector('.poem-content');
+  const contentStart = 0.05 + (titleChars + authorChars) * CONFIG.poemCharacterInterval + 0.3;
+  buildCharacterSpans(contentEl, poem.content, contentStart);
+
+  // 显示弹窗：visible 触发 opacity:1 + borderPulse
+  poemOverlay.classList.add('visible');
+  if (CONFIG.poemFloatEnabled) {
+    poemOverlay.classList.add('floating'); // 叠加悬浮动画
+  }
+  isPoemVisible = true;
+
+  if (CONFIG.poemDimBackground) dimBackground(true);
+  poemOverlay.scrollTop = 0;
+}
+
+/** 隐藏诗词 */
+function hidePoem() {
+  if (!isPoemVisible) return;
+  hidePoemWithAnimation(null);
+}
+
+/** 隐藏诗词（带粒子消散，支持回调链） */
+function hidePoemWithAnimation(callback) {
+  if (!isPoemVisible) { if (callback) callback(); return; }
+
+  spawnExitParticles();
+  // 用 exiting class 触发消散动画（!important 覆盖 visible/floating 的动画）
+  poemOverlay.classList.add('exiting');
+  poemOverlay.classList.remove('visible', 'floating');
+  isPoemVisible = false;
+  if (CONFIG.poemDimBackground) dimBackground(false);
+
+  const cleanup = () => {
+    poemOverlay.removeEventListener('animationend', cleanup);
+    poemOverlay.classList.remove('exiting');
+    clearParticles();
+    clearCharacterSpans();
+    if (callback) callback();
+  };
+  poemOverlay.addEventListener('animationend', cleanup, { once: true });
+
+  // 兜底清理（1s后强制）
+  setTimeout(() => {
+    if (poemOverlay.classList.contains('exiting')) {
+      poemOverlay.classList.remove('exiting');
+      clearParticles();
+      clearCharacterSpans();
+      if (callback) callback();
+    }
+  }, 1000);
+}
+
+/** 生成消散粒子 */
+function spawnExitParticles() {
+  const container = document.getElementById('poem-particles');
+  if (!container) return;
+  clearParticles();
+
+  const rect = poemOverlay.getBoundingClientRect();
+  const maxR = Math.max(rect.width, rect.height) * 0.7;
+  const count = CONFIG.poemExitParticleCount;
+  const frag = document.createDocumentFragment();
+
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement('div');
+    p.className = 'poem-particle';
+    p.style.left = ((Math.random() - 0.5) * rect.width * 0.9) + 'px';
+    p.style.top = ((Math.random() - 0.5) * rect.height * 0.9) + 'px';
+    const angle = Math.random() * Math.PI * 2;
+    const dist = maxR * (0.4 + Math.random() * 0.9);
+    p.style.setProperty('--px', Math.cos(angle) * dist + 'px');
+    p.style.setProperty('--py', Math.sin(angle) * dist + 'px');
+    p.style.animationDelay = Math.random() * 0.25 + 's';
+    frag.appendChild(p);
+  }
+  container.appendChild(frag);
+  requestAnimationFrame(() => {
+    container.querySelectorAll('.poem-particle').forEach(p => p.classList.add('fly'));
+  });
+}
+
+/** 清理消散粒子 */
+function clearParticles() {
+  const c = document.getElementById('poem-particles');
+  if (c) c.innerHTML = '';
+}
+
+/** 背景变暗聚焦 / 恢复 — 平滑过渡泛光强度 */
+let dimTargetBloom = null;
+let dimAnimFrame = null;
+function dimBackground(dim) {
+  if (!bloomPass) return;
+  dimTargetBloom = dim
+    ? CONFIG.bloomIntensity * CONFIG.poemDimAmount
+    : CONFIG.bloomIntensity;
+
+  if (dimAnimFrame) cancelAnimationFrame(dimAnimFrame);
+  function step() {
+    if (!bloomPass) return;
+    const delta = dimTargetBloom - bloomPass.strength;
+    if (Math.abs(delta) < 0.003) {
+      bloomPass.strength = dimTargetBloom;
+      dimAnimFrame = null;
+      return;
+    }
+    bloomPass.strength += delta * 0.14;
+    dimAnimFrame = requestAnimationFrame(step);
+  }
+  dimAnimFrame = requestAnimationFrame(step);
+}
+
+/** 为节点分配一首未使用的诗词（不重复抽取） */
+function assignPoemToNode(nodeIndex) {
+  if (nodePoemMap.has(nodeIndex)) {
+    return nodePoemMap.get(nodeIndex); // 已分配，直接返回
+  }
+  if (poemPool.length === 0) {
+    // 池空，重新洗牌
+    poemPool = Array.from({ length: POEMS.length }, (_, i) => i);
+    for (let i = poemPool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [poemPool[i], poemPool[j]] = [poemPool[j], poemPool[i]];
+    }
+  }
+  const poemIdx = poemPool.pop();
+  nodePoemMap.set(nodeIndex, poemIdx);
+  return poemIdx;
+}
+
+// ===================================================================
+//  十二、交互逻辑（射线检测 + 键盘事件）
+// ===================================================================
+function initInteraction() {
+  raycaster = new THREE.Raycaster();
+  raycaster.params.Points.threshold = 0.5; // 增大点击容差
+  mouse = new THREE.Vector2();
+
+  // 鼠标点击检测
+  renderer.domElement.addEventListener('click', onMouseClick);
+
+  // 键盘事件：空格键聚散切换
+  window.addEventListener('keydown', onKeyDown);
+
+  // 窗口大小自适应
+  window.addEventListener('resize', onWindowResize);
+
+  console.log('🖱️ 交互系统初始化完成');
+}
+
+function onMouseClick(event) {
+  // 计算归一化设备坐标
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+
+  // 仅检测 InstancedMesh
+  const intersects = raycaster.intersectObject(instancedMesh);
+
+  if (intersects.length > 0) {
+    // 点击到了节点
+    const instanceId = intersects[0].instanceId;
+    if (instanceId !== undefined && instanceId < CONFIG.nodeCount) {
+      const poemIdx = assignPoemToNode(instanceId);
+      showPoem(poemIdx);
+      event.stopPropagation();
+    }
+  } else {
+    // 点击空白处，如果诗词正在显示则关闭
+    if (isPoemVisible) {
+      hidePoem();
+    }
+  }
+}
+
+function onKeyDown(event) {
+  if (event.code === 'Space') {
+    event.preventDefault();
+    if (isAnimating) return; // 动画进行中忽略
+
+    // 切换状态
+    isAnimating = true;
+    animStartTime = performance.now();
+    animFromGathered = isGathered;
+    isGathered = !isGathered;
+  }
+}
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+}
+
+// ===================================================================
+//  十三、动画循环（核心渲染循环）
+// ===================================================================
+function animate() {
+  requestAnimationFrame(animate);
+
+  const dt = Math.min(clock.getDelta(), 0.1); // 防止大帧跳跃
+  const elapsed = clock.getElapsedTime();
+
+  controls.update();
+
+  // ---- 星云旋转：自动公转 + 手势单手旋转控制 ----
+  if (handState.targetRotateY !== null && handGestureActive) {
+    // 手势控制旋转（平滑插值到目标角度）
+    const lerpSpeed = 0.12; // 旋转平滑速度
+    nebulaGroup.rotation.y += (handState.targetRotateY - nebulaGroup.rotation.y) * lerpSpeed;
+    nebulaGroup.rotation.x += (handState.targetRotateX - nebulaGroup.rotation.x) * lerpSpeed;
+  } else {
+    // 默认自动公转
+    nebulaGroup.rotation.y += CONFIG.rotationSpeed * dt;
+  }
+
+  // ---- 相机缩放：手势双手缩放控制 ----
+  if (handState.targetZoom !== null && handGestureActive) {
+    const currentDist = camera.position.distanceTo(controls.target);
+    const newDist = currentDist + (handState.targetZoom - currentDist) * 0.1;
+    const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+    camera.position.copy(controls.target).addScaledVector(dir, newDist);
+  }
+
+  // ---- 聚散动画处理（空格键 + 手势双拳无级控制） ----
+  let gatherProgress = isGathered ? 1.0 : 0.0;
+
+  // 手势双拳控制：连续无级调节聚合度
+  if (handState.targetGatherProgress !== null && handGestureActive) {
+    gatherProgress = handState.targetGatherProgress;
+    // 同步更新状态，确保空格键可以从当前状态切换
+    isGathered = gatherProgress > 0.5;
+    isAnimating = false; // 手势控制时停止空格键动画
+  } else if (isAnimating) {
+    // 空格键触发的聚散动画
+    const rawProgress = (performance.now() - animStartTime) / CONFIG.gatherDuration;
+    if (rawProgress >= 1.0) {
+      gatherProgress = isGathered ? 1.0 : 0.0;
+      isAnimating = false;
+    } else {
+      const easedProgress = easeInOutCubic(rawProgress);
+      gatherProgress = animFromGathered ? (1.0 - easedProgress) : easedProgress;
+    }
+  }
+
+  // ---- 更新节点位置 ----
+  const dummy = new THREE.Object3D();
+  const floatTime = elapsed;
+
+  for (let i = 0; i < CONFIG.nodeCount; i++) {
+    const scattered = scatteredPositions[i];
+    const gathered = gatheredPositions[i];
+    const fp = floatParams[i];
+
+    // 计算漂浮偏移（Lissajous式三维浮动）
+    const floatX = Math.sin(floatTime * fp.speed + fp.phaseX) * fp.ampX;
+    const floatY = Math.cos(floatTime * fp.speed * 1.3 + fp.phaseY) * fp.ampY;
+    const floatZ = Math.sin(floatTime * fp.speed * 0.7 + fp.phaseZ) * fp.ampZ;
+
+    // 聚散插值
+    const lerpFactor = gatherProgress;
+    const baseX = scattered.x + (gathered.x - scattered.x) * lerpFactor;
+    const baseY = scattered.y + (gathered.y - scattered.y) * lerpFactor;
+    const baseZ = scattered.z + (gathered.z - scattered.z) * lerpFactor;
+
+    // 最终位置 = 插值位置 + 漂浮偏移
+    dummy.position.set(
+      baseX + floatX,
+      baseY + floatY,
+      baseZ + floatZ
+    );
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    instancedMesh.setMatrixAt(i, dummy.matrix);
+  }
+  instancedMesh.instanceMatrix.needsUpdate = true;
+
+  // ---- 更新连线位置（基于当前节点位置） ----
+  if (linkPairs.length > 0 && linkPositions.length > 0) {
+    // 获取当前所有节点的世界矩阵（相对于nebulaGroup）
+    // 注：instancedMesh在nebulaGroup下，矩阵已是局部坐标
+    const linkCount = linkPairs.length;
+    for (let k = 0; k < linkCount; k++) {
+      const [i, j] = linkPairs[k];
+      const baseIdx = k * 6;
+
+      // 复用对象避免每帧分配内存（性能关键）
+      const matrixA = _matA;
+      const matrixB = _matB;
+      instancedMesh.getMatrixAt(i, matrixA);
+      instancedMesh.getMatrixAt(j, matrixB);
+
+      _posA.setFromMatrixPosition(matrixA);
+      _posB.setFromMatrixPosition(matrixB);
+      const posA = _posA;
+      const posB = _posB;
+
+      linkPositions[baseIdx] = posA.x;
+      linkPositions[baseIdx + 1] = posA.y;
+      linkPositions[baseIdx + 2] = posA.z;
+      linkPositions[baseIdx + 3] = posB.x;
+      linkPositions[baseIdx + 4] = posB.y;
+      linkPositions[baseIdx + 5] = posB.z;
+    }
+    linkLines.geometry.attributes.position.needsUpdate = true;
+  }
+
+  // ---- 更新尘埃粒子（缓慢漂移） ----
+  if (dustParticles && dustData.length > 0) {
+    const dustPositions = dustParticles.geometry.attributes.position.array;
+    for (let i = 0; i < dustData.length; i++) {
+      const dd = dustData[i];
+      dustPositions[i * 3] = dd.baseX + Math.sin(elapsed * 0.3 + dd.phase) * dd.amplitude;
+      dustPositions[i * 3 + 1] = dd.baseY + Math.cos(elapsed * 0.25 + dd.phase) * dd.amplitude * 0.7;
+      dustPositions[i * 3 + 2] = dd.baseZ + Math.cos(elapsed * 0.35 + dd.phase) * dd.amplitude;
+    }
+    dustParticles.geometry.attributes.position.needsUpdate = true;
+  }
+
+  // ---- 后期渲染（泛光） ----
+  composer.render();
+}
+
+// ===================================================================
+//  十四、启动入口
+// ===================================================================
+function init() {
+  initScene();
+  initPostProcessing();
+  createNodes();
+  createLinks();
+  createStarfield();
+  createDustParticles();
+  setupPoemOverlay();
+  initInteraction();
+  setupHandGestureUI();  // 手势控制UI（按钮事件）
+  setupNodeSlider();     // 节点数量滑块
+
+  console.log('🚀 诗云可视化已启动');
+  console.log('   🖱️ 鼠标拖拽旋转 | 滚轮缩放 | 右键平移');
+  console.log('   ⌨️ 空格键：聚/散切换');
+  console.log('   🖱️ 点击节点：查看诗词');
+  console.log('   🖐️ 点击右下角按钮：启用手势控制');
+  console.log('   🎚️ 左下角滑块：调节诗云节点数量 (100-2000)');
+
+  // 启动渲染循环
+  animate();
+}
+
+// 页面加载完毕后启动
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
